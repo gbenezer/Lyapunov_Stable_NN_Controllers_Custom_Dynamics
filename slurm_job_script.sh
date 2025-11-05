@@ -16,4 +16,4 @@ module purge
 module load explorer anaconda3/2024.06 cuda/12.1.1
 conda activate lyapunov_neural_control
 export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
-python examples/quadrotor2d_output_training.py user=benezerg_quadrotor2d_state_training
+python examples/path_tracking_state_training.py user=benezerg_path_tracking_state_training
