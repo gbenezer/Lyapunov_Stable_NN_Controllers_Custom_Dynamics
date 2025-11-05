@@ -17,7 +17,7 @@ train:
   train_lyaloss: False
   wandb:
     enabled: ${user.wandb_enabled}
-    project: neural_lyapunov_training
+    project: ${user.wandb_project}
     name: ${now:%Y.%m.%d-%H.%M.%S}_${wandb_name}
     dir: ${user.run_dir}
     entity: ${user.wandb_entity}
