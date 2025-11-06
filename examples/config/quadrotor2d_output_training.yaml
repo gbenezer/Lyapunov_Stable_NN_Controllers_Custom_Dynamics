@@ -12,10 +12,10 @@ wandb_name: quadrotor2d_output
 
 model:
   load_lyaloss: ${user.load_lyaloss}
-  save_lyaloss: true
+  save_lyaloss: True
   limit_scale: 0.1
   kappa: 0.04
-  V_decrease_within_roa: true
+  V_decrease_within_roa: True
   rho_multiplier: 1.5
 
 train:

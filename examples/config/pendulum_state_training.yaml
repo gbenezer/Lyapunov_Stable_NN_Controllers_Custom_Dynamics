@@ -39,7 +39,6 @@ train:
   Vmin_x_pgd_path: ${user.Vmin_x_pgd_path}
   hard_max: True
   num_samples_per_boundary: 1024
-
   batch_size: 1024
   epochs: 100
   pgd_steps: 150
