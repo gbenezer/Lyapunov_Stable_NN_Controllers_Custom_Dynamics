@@ -229,6 +229,14 @@ def main(cfg: DictConfig):
             always_candidate_roa_regulizer=cfg.loss.always_candidate_roa_regulizer,
         )
 
+    torch.save(
+        {
+            "state_dict": lyapunov_nn.state_dict(),
+            "rho": derivative_lyaloss.get_rho(),
+        },
+        os.path.join(os.getcwd(), "lyapunov_nn.pth"),
+    )
+
     # "Verify" Lyapunov conditions with PGD attack
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeDOFLoss(
         dynamics,
