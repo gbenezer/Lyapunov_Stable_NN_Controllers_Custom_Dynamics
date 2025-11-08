@@ -8,7 +8,7 @@ hydra:
   sweep:
     dir: ${user.run_dir}
 
-wandb_name: pendulum
+wandb_name: pendulum_state_${user.wandb_suffix}
 
 # Boolean to approximate LQR
 approximate_lqr: False

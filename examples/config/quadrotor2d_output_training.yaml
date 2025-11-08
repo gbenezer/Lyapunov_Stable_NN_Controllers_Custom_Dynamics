@@ -8,7 +8,7 @@ hydra:
   sweep:
     dir: ${user.run_dir}
 
-wandb_name: quadrotor2d_output
+wandb_name: quadrotor2d_output_${user.wandb_suffix}
 
 model:
   load_lyaloss: ${user.load_lyaloss}

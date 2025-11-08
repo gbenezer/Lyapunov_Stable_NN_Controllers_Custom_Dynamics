@@ -8,7 +8,7 @@ hydra:
   sweep:
     dir: ${user.run_dir}
 
-wandb_name: path_tracking
+wandb_name: path_tracking_${user.wandb_suffix}
 
 approximate_lqr: False
 

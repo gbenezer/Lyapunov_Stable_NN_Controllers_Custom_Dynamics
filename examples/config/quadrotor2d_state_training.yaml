@@ -8,7 +8,7 @@ hydra:
   sweep:
     dir: ${user.run_dir}
 
-wandb_name: quadrotor2d_state
+wandb_name: quadrotor2d_state_${user.wandb_suffix}
 
 # Boolean to approximate LQR
 approximate_lqr: False
