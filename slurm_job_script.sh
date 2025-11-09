@@ -3,17 +3,15 @@
 #SBATCH --nodes=1 # number of nodes ()
 #SBATCH --gres=gpu:v100-pcie:1 # type of GPU
 #SBATCH --time=04:00:00
-#SBATCH --job-name=test_job_path
+#SBATCH --job-name=quadrotor2d_output_08Nov2025_V100_PCIe_set_1
 #SBATCH --mem=8GB
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --output=test_job_path.%j.out
-#SBATCH --error=test_job_path.%j.err
-#SBATCH --mail-user=benezer.gi@northeastern.edu
-#SBATCH --mail-type=ALL
+#SBATCH --output=output/benezerg/quadrotor2d_output/job_logs/quadrotor2d_output_08Nov2025_V100_PCIe_set_1.%j.out
+#SBATCH --error=output/benezerg/quadrotor2d_output/job_logs/quadrotor2d_output_08Nov2025_V100_PCIe_set_1.%j.err
 
-# module purge
-# module load explorer anaconda3/2024.06 cuda/12.1.1
-# conda activate lyapunov_neural_control
 export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
-python examples/path_tracking_state_training.py user=benezerg_path_tracking_state_training
+for i in {1..6};
+do
+    python examples/quadrotor2d_output_training.py user=benezerg_quadrotor2d_output_training
+done
