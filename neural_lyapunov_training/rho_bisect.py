@@ -1,4 +1,4 @@
-"""Bisection on rho."""
+"""Bisection on rho. Only used for creating specifications for verification of new models."""
 import argparse
 import os
 import sys
