@@ -1391,6 +1391,38 @@ class GenericDiscreteTimeSystem(nn.Module):
         Bd = self.dt * Bc
         return Ad, Bd
 
+    def linearized_observation(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Compute linearized observation matrix C = dh/dx
+        
+        For discrete-time systems, the observation is the same as continuous-time
+        since h(x) doesn't depend on the discretization. The observation is with respect to
+        state x and not time t.
+        
+        Args:
+            x: State tensor (batch, nx) or (nx,)
+        
+        Returns:
+            C: Observation Jacobian (batch, ny, nx) or (ny, nx)
+        """
+        return self.continuous_time_system.linearized_observation(x)
+    
+    def h(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Evaluate output equation: y = h(x)
+        
+        For discrete-time systems, the observation is the same as continuous-time
+        since h(x) doesn't depend on the discretization. The observation is with respect to
+        state x and not time t.
+        
+        Args:
+            x: State tensor
+        
+        Returns:
+            Output tensor
+        """
+        return self.continuous_time_system.h(x)
+
     @property
     def x_equilibrium(self) -> torch.Tensor:
         return self.continuous_time_system.x_equilibrium
