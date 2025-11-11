@@ -56,57 +56,53 @@ def _torch_max(*args):
             torch.as_tensor(a) if not isinstance(a, torch.Tensor) else a for a in args
         ]
         return torch.max(torch.stack(tensors))
-        
+
+
 def _identity_matrix(*args):
     """Handle ImmutableDenseMatrix - just return the args as tuple"""
     return args if len(args) > 1 else args[0]
 
+
 SYMPY_TO_TORCH = {
     # Trigonometric
-    'sin': torch.sin,
-    'cos': torch.cos,
-    'tan': torch.tan,
-    'asin': torch.asin,
-    'acos': torch.acos,
-    'atan': torch.atan,
-    'atan2': torch.atan2,
-    'sinh': torch.sinh,
-    'cosh': torch.cosh,
-    'tanh': torch.tanh,
-    
+    "sin": torch.sin,
+    "cos": torch.cos,
+    "tan": torch.tan,
+    "asin": torch.asin,
+    "acos": torch.acos,
+    "atan": torch.atan,
+    "atan2": torch.atan2,
+    "sinh": torch.sinh,
+    "cosh": torch.cosh,
+    "tanh": torch.tanh,
     # Exponential/Logarithmic
-    'exp': torch.exp,
-    'log': torch.log,
-    'sqrt': torch.sqrt,
-    
+    "exp": torch.exp,
+    "log": torch.log,
+    "sqrt": torch.sqrt,
     # Absolute value and sign - CRITICAL: SymPy uses 'Abs' not 'abs'
-    'Abs': torch.abs,
-    'abs': torch.abs,  # Include lowercase for safety
-    'sign': torch.sign,
-    
+    "Abs": torch.abs,
+    "abs": torch.abs,  # Include lowercase for safety
+    "sign": torch.sign,
     # Min/Max - CRITICAL: SymPy uses 'Min' and 'Max' (capital letters)
     # Use helper functions to handle scalar/tensor combinations
-    'Min': _torch_min,
-    'Max': _torch_max,
-    
+    "Min": _torch_min,
+    "Max": _torch_max,
     # Power - CRITICAL: SymPy uses 'Pow' (capital P)
-    'Pow': torch.pow,
-    
+    "Pow": torch.pow,
     # Rounding
-    'floor': torch.floor,
-    'ceil': torch.ceil,
-    'round': torch.round,
-    
+    "floor": torch.floor,
+    "ceil": torch.ceil,
+    "round": torch.round,
     # Additional useful functions
-    'clip': torch.clamp,
-    'minimum': torch.minimum,
-    'maximum': torch.maximum,
-    
+    "clip": torch.clamp,
+    "minimum": torch.minimum,
+    "maximum": torch.maximum,
     # Matrix handling - SymPy sometimes uses these
-    'ImmutableDenseMatrix': _identity_matrix,
-    'MutableDenseMatrix': _identity_matrix,
-    'Matrix': _identity_matrix,
+    "ImmutableDenseMatrix": _identity_matrix,
+    "MutableDenseMatrix": _identity_matrix,
+    "Matrix": _identity_matrix,
 }
+
 
 class IntegrationMethod(Enum):
     """Available numerical integration methods"""
@@ -277,6 +273,9 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         """
         Compute symbolic linearization A = df/dx, B = df/du
 
+        For second-order systems, constructs the full state-space linearization
+        from the acceleration dynamics.
+
         Args:
             x_eq: Equilibrium state (zeros if None)
             u_eq: Equilibrium control (zeros if None)
@@ -293,12 +292,57 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         if self._A_sym_cached is None:
             self._cache_jacobians()
 
+        if self.order == 1:
+            # First-order system: straightforward Jacobian
+            A_sym = self._A_sym_cached
+            B_sym = self._B_sym_cached
+        elif self.order == 2:
+            # Second-order system: x = [q, qdot], qddot = f(x, u)
+            # Need to construct full state-space form:
+            # d/dt [q]    = [      0       I  ] [q]    + [  0  ] u
+            #      [qdot]   [df/dq   df/dqdot]  [qdot]   [df/du]
+
+            nq = self.nq
+
+            # Compute Jacobians of acceleration w.r.t. q and qdot
+            A_accel = self._f_sym.jacobian(self.state_vars)  # (nq, nx)
+            B_accel = self._B_sym_cached  # (nq, nu)
+
+            # Construct full state-space matrices
+            A_sym = sp.zeros(self.nx, self.nx)
+            A_sym[:nq, nq:] = sp.eye(nq)  # dq/dt = qdot
+            A_sym[nq:, :] = A_accel  # dqdot/dt = f(q, qdot, u)
+
+            B_sym = sp.zeros(self.nx, self.nu)
+            B_sym[nq:, :] = B_accel  # Control affects acceleration
+        else:
+            # Higher-order systems
+            # x = [q, q', q'', ..., q^(n-1)], q^(n) = f(x, u)
+            # State-space form has similar structure
+            nq = self.nq
+            order = self.order
+
+            A_highest = self._f_sym.jacobian(
+                self.state_vars
+            )  # Jacobian of highest derivative
+            B_highest = self._B_sym_cached
+
+            A_sym = sp.zeros(self.nx, self.nx)
+            # Each derivative becomes the next one
+            for i in range(order - 1):
+                A_sym[i * nq : (i + 1) * nq, (i + 1) * nq : (i + 2) * nq] = sp.eye(nq)
+            # Highest derivative
+            A_sym[(order - 1) * nq :, :] = A_highest
+
+            B_sym = sp.zeros(self.nx, self.nu)
+            B_sym[(order - 1) * nq :, :] = B_highest
+
         # Substitute equilibrium point
         subs_dict = dict(
             zip(self.state_vars + self.control_vars, list(x_eq) + list(u_eq))
         )
-        A = self._A_sym_cached.subs(subs_dict)
-        B = self._B_sym_cached.subs(subs_dict)
+        A = A_sym.subs(subs_dict)
+        B = B_sym.subs(subs_dict)
 
         # Substitute parameters
         A = self.substitute_parameters(A)
@@ -572,34 +616,33 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
     def h(self, x: torch.Tensor) -> torch.Tensor:
         """
         Evaluate output equation: y = h(x)
-        
+
         Args:
             x: State tensor
-            
+
         Returns:
             Output tensor
         """
         if self._h_sym is None:
             return x
-        
+
         # Generate torch function for h if not cached
         if self._h_torch is None:
             h_with_params = self.substitute_parameters(self._h_sym)
             # Use ONLY our custom namespace (don't add 'torch' as fallback to avoid conflicts)
             self._h_torch = sp.lambdify(
-                self.state_vars, h_with_params, 
-                modules=[SYMPY_TO_TORCH]
+                self.state_vars, h_with_params, modules=[SYMPY_TO_TORCH]
             )
-        
+
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
             squeeze_output = True
         else:
             squeeze_output = False
-        
+
         x_list = [x[:, i] for i in range(self.nx)]
         result = self._h_torch(*x_list)
-        
+
         # Handle various return types from lambdify
         def flatten_result(r):
             """Recursively flatten nested lists/tuples to get tensors"""
@@ -613,16 +656,16 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             else:
                 # Scalar - convert to tensor
                 return [torch.as_tensor(r)]
-        
+
         if isinstance(result, (list, tuple)):
             flat_tensors = flatten_result(result)
             result = torch.stack(flat_tensors, dim=-1)
         elif not isinstance(result, torch.Tensor):
             result = torch.as_tensor(result).unsqueeze(-1)
-        
+
         if squeeze_output:
             result = result.squeeze(0)
-        
+
         return result
 
     def print_equations(self, simplify: bool = True):
@@ -899,20 +942,24 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             "ny": self.ny,
         }
 
-    def lqr_control(self, Q: np.ndarray, R: np.ndarray, 
-                x_eq: Optional[torch.Tensor] = None,
-                u_eq: Optional[torch.Tensor] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def lqr_control(
+        self,
+        Q: np.ndarray,
+        R: np.ndarray,
+        x_eq: Optional[torch.Tensor] = None,
+        u_eq: Optional[torch.Tensor] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute LQR control gain for continuous-time system
-        
+
         The control law is: u = K @ (x - x_eq) + u_eq
-        
+
         Args:
             Q: State cost matrix (nx, nx)
             R: Control cost matrix (nu, nu) or scalar for single input
             x_eq: Equilibrium state (uses self.x_equilibrium if None)
             u_eq: Equilibrium control (uses self.u_equilibrium if None)
-        
+
         Returns:
             (K, S): Control gain matrix and solution to Riccati equation
         """
@@ -920,28 +967,28 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             x_eq = self.x_equilibrium
         if u_eq is None:
             u_eq = self.u_equilibrium
-        
+
         # Ensure proper shape
         if len(x_eq.shape) == 1:
             x_eq = x_eq.unsqueeze(0)
         if len(u_eq.shape) == 1:
             u_eq = u_eq.unsqueeze(0)
-        
+
         # Get linearized dynamics at equilibrium
         A, B = self.linearized_dynamics(x_eq, u_eq)
         A = A.squeeze().detach().cpu().numpy()
         B = B.squeeze().detach().cpu().numpy()
-        
+
         # Ensure B is 2D (nx, nu)
         if B.ndim == 1:
             B = B.reshape(-1, 1)
-        
+
         # Ensure R is 2D
         if isinstance(R, (int, float)):
             R = np.array([[R]])
         elif R.ndim == 1:
             R = np.diag(R)
-        
+
         # Validate dimensions
         nx, nu = B.shape
         if A.shape != (nx, nx):
@@ -950,31 +997,33 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             raise ValueError(f"Q must be ({nx}, {nx}), got {Q.shape}")
         if R.shape != (nu, nu):
             raise ValueError(f"R must be ({nu}, {nu}), got {R.shape}")
-        
+
         # Solve continuous-time algebraic Riccati equation
         S = scipy.linalg.solve_continuous_are(A, B, Q, R)
-        
+
         # Compute optimal gain
         K = -np.linalg.solve(R, B.T @ S)
-        
+
         return K, S
 
-
-    def kalman_gain(self, Q_process: Optional[np.ndarray] = None,
-                    R_measurement: Optional[np.ndarray] = None,
-                    x_eq: Optional[torch.Tensor] = None,
-                    u_eq: Optional[torch.Tensor] = None) -> np.ndarray:
+    def kalman_gain(
+        self,
+        Q_process: Optional[np.ndarray] = None,
+        R_measurement: Optional[np.ndarray] = None,
+        x_eq: Optional[torch.Tensor] = None,
+        u_eq: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
         """
         Compute Kalman filter gain for continuous-time system
-        
+
         Observer dynamics: dx̂/dt = f(x̂, u) + L(y - h(x̂))
-        
+
         Args:
             Q_process: Process noise covariance (nx, nx)
             R_measurement: Measurement noise covariance (ny, ny) or scalar
             x_eq: Equilibrium state
             u_eq: Equilibrium control
-        
+
         Returns:
             L: Kalman gain matrix (nx, ny)
         """
@@ -986,32 +1035,34 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             x_eq = self.x_equilibrium
         if u_eq is None:
             u_eq = self.u_equilibrium
-        
+
         # Ensure proper shape
         if len(x_eq.shape) == 1:
             x_eq = x_eq.unsqueeze(0)
-        
+
         # Get linearized dynamics
-        A, _ = self.linearized_dynamics(x_eq, u_eq if len(u_eq.shape) > 1 else u_eq.unsqueeze(0))
+        A, _ = self.linearized_dynamics(
+            x_eq, u_eq if len(u_eq.shape) > 1 else u_eq.unsqueeze(0)
+        )
         A = A.squeeze().detach().cpu().numpy()
-        
+
         C = self.linearized_observation(x_eq)
         C = C.squeeze().detach().cpu().numpy()
-        
+
         # Ensure C is 2D (ny, nx)
         if C.ndim == 1:
             C = C.reshape(1, -1)
-        
+
         # Ensure R_measurement is 2D
         if isinstance(R_measurement, (int, float)):
             R_measurement = np.array([[R_measurement]])
         elif R_measurement.ndim == 1:
             R_measurement = np.diag(R_measurement)
-        
+
         # Validate dimensions
         nx = A.shape[0]
         ny = C.shape[0]
-        
+
         if A.shape != (nx, nx):
             raise ValueError(f"A must be square, got {A.shape}")
         if C.shape[1] != nx:
@@ -1019,33 +1070,38 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         if Q_process.shape != (nx, nx):
             raise ValueError(f"Q_process must be ({nx}, {nx}), got {Q_process.shape}")
         if R_measurement.shape != (ny, ny):
-            raise ValueError(f"R_measurement must be ({ny}, {ny}), got {R_measurement.shape}")
-        
+            raise ValueError(
+                f"R_measurement must be ({ny}, {ny}), got {R_measurement.shape}"
+            )
+
         # Solve continuous-time algebraic Riccati equation (dual problem)
         P = scipy.linalg.solve_continuous_are(A.T, C.T, Q_process, R_measurement)
-        
+
         # Compute Kalman gain
         L = P @ C.T @ np.linalg.inv(R_measurement)
-        
+
         return L
 
-
-    def lqg_control(self, Q_lqr: np.ndarray, R_lqr: np.ndarray,
-                    Q_process: Optional[np.ndarray] = None,
-                    R_measurement: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def lqg_control(
+        self,
+        Q_lqr: np.ndarray,
+        R_lqr: np.ndarray,
+        Q_process: Optional[np.ndarray] = None,
+        R_measurement: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute LQG controller (LQR + Kalman filter)
-        
+
         Returns both the control gain K and observer gain L for output feedback control:
         - dx̂/dt = f(x̂, u) + L(y - h(x̂))
         - u = K @ (x̂ - x_eq) + u_eq
-        
+
         Args:
             Q_lqr: State cost for LQR
             R_lqr: Control cost for LQR
             Q_process: Process noise covariance
             R_measurement: Measurement noise covariance
-        
+
         Returns:
             (K, L): Control gain and observer gain
         """
@@ -1053,62 +1109,63 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         L = self.kalman_gain(Q_process, R_measurement)
         return K, L
 
-
     def lqg_closed_loop_matrix(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
         Compute closed-loop system matrix for LQG control
-        
+
         Augmented state: [x, x̂] where x̂ is the estimate
         Closed-loop dynamics:
             dx/dt = f(x, K(x̂ - x_eq) + u_eq)
             dx̂/dt = f(x̂, K(x̂ - x_eq) + u_eq) + L(h(x) - h(x̂))
-        
+
         Linearized around equilibrium:
             d[x, x̂]/dt = A_cl [x, x̂]
-        
+
         Args:
             K: LQR control gain (nu, nx)
             L: Kalman filter gain (nx, ny)
-        
+
         Returns:
             A_cl: Closed-loop system matrix (2*nx, 2*nx)
         """
         x_eq = self.x_equilibrium.unsqueeze(0)
         u_eq = self.u_equilibrium.unsqueeze(0)
-        
+
         A, B = self.linearized_dynamics(x_eq, u_eq)
         A = A.squeeze().detach().cpu().numpy()
         B = B.squeeze().detach().cpu().numpy()
-        
+
         # Ensure B is 2D
         if B.ndim == 1:
             B = B.reshape(-1, 1)
-        
+
         C = self.linearized_observation(x_eq).squeeze().detach().cpu().numpy()
-        
+
         # Ensure C is 2D
         if C.ndim == 1:
             C = C.reshape(1, -1)
-        
+
         # Ensure K is 2D (nu, nx)
         if K.ndim == 1:
             K = K.reshape(1, -1)
-        
+
         # Ensure L is 2D (nx, ny)
         if L.ndim == 1:
             L = L.reshape(-1, 1)
-        
+
         # Closed-loop system: [x, x̂]
         # dx/dt = Ax + B K x̂
         # dx̂/dt = A x̂ + B K x̂ + L(Cx - C x̂) = (A + B K - L C) x̂ + L C x
-        A_cl = np.vstack([
-            np.hstack([A + B @ K, -B @ K]),              # dx/dt
-            np.hstack([L @ C, A + B @ K - L @ C])        # dx̂/dt
-        ])
-        
+        A_cl = np.vstack(
+            [
+                np.hstack([A + B @ K, -B @ K]),  # dx/dt
+                np.hstack([L @ C, A + B @ K - L @ C]),  # dx̂/dt
+            ]
+        )
+
         # Clean up near-zero entries
         A_cl[np.abs(A_cl) <= 1e-6] = 0
-        
+
         return A_cl
 
 
@@ -1394,30 +1451,30 @@ class GenericDiscreteTimeSystem(nn.Module):
     def linearized_observation(self, x: torch.Tensor) -> torch.Tensor:
         """
         Compute linearized observation matrix C = dh/dx
-        
+
         For discrete-time systems, the observation is the same as continuous-time
         since h(x) doesn't depend on the discretization. The observation is with respect to
         state x and not time t.
-        
+
         Args:
             x: State tensor (batch, nx) or (nx,)
-        
+
         Returns:
             C: Observation Jacobian (batch, ny, nx) or (ny, nx)
         """
         return self.continuous_time_system.linearized_observation(x)
-    
+
     def h(self, x: torch.Tensor) -> torch.Tensor:
         """
         Evaluate output equation: y = h(x)
-        
+
         For discrete-time systems, the observation is the same as continuous-time
         since h(x) doesn't depend on the discretization. The observation is with respect to
         state x and not time t.
-        
+
         Args:
             x: State tensor
-        
+
         Returns:
             Output tensor
         """
@@ -1444,20 +1501,24 @@ class GenericDiscreteTimeSystem(nn.Module):
             f"(dt={self.dt:.4f}, {self.integration_method.name})"
         )
 
-    def dlqr_control(self, Q: np.ndarray, R: np.ndarray,
-                 x_eq: Optional[torch.Tensor] = None,
-                 u_eq: Optional[torch.Tensor] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def dlqr_control(
+        self,
+        Q: np.ndarray,
+        R: np.ndarray,
+        x_eq: Optional[torch.Tensor] = None,
+        u_eq: Optional[torch.Tensor] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute discrete-time LQR control gain
-        
+
         The control law is: u = K @ (x - x_eq) + u_eq
-        
+
         Args:
             Q: State cost matrix (nx, nx)
             R: Control cost matrix (nu, nu) or scalar for single input
             x_eq: Equilibrium state
             u_eq: Equilibrium control
-        
+
         Returns:
             (K, S): Control gain matrix and solution to discrete Riccati equation
         """
@@ -1465,50 +1526,52 @@ class GenericDiscreteTimeSystem(nn.Module):
             x_eq = self.x_equilibrium
         if u_eq is None:
             u_eq = self.u_equilibrium
-        
+
         # Ensure proper shape
         if len(x_eq.shape) == 1:
             x_eq = x_eq.unsqueeze(0)
         if len(u_eq.shape) == 1:
             u_eq = u_eq.unsqueeze(0)
-        
+
         # Get discrete linearized dynamics at equilibrium
         Ad, Bd = self.linearized_dynamics(x_eq, u_eq)
         Ad = Ad.squeeze().detach().cpu().numpy()
         Bd = Bd.squeeze().detach().cpu().numpy()
-        
+
         # Ensure Bd is 2D
         if Bd.ndim == 1:
             Bd = Bd.reshape(-1, 1)
-        
+
         # Ensure R is 2D
         if isinstance(R, (int, float)):
             R = np.array([[R]])
         elif R.ndim == 1:
             R = np.diag(R)
-        
+
         # Solve discrete-time algebraic Riccati equation
         S = scipy.linalg.solve_discrete_are(Ad, Bd, Q, R)
-        
+
         # Compute optimal gain
         K = -np.linalg.solve(R + Bd.T @ S @ Bd, Bd.T @ S @ Ad)
-        
+
         return K, S
 
-
-    def discrete_kalman_gain(self, Q_process: Optional[np.ndarray] = None,
-                            R_measurement: Optional[np.ndarray] = None,
-                            x_eq: Optional[torch.Tensor] = None) -> np.ndarray:
+    def discrete_kalman_gain(
+        self,
+        Q_process: Optional[np.ndarray] = None,
+        R_measurement: Optional[np.ndarray] = None,
+        x_eq: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
         """
         Compute discrete-time Kalman filter gain
-        
+
         Observer update: x̂[k+1] = f_discrete(x̂[k], u[k]) + L(y[k+1] - h(f_discrete(x̂[k], u[k])))
-        
+
         Args:
             Q_process: Process noise covariance (nx, nx)
             R_measurement: Measurement noise covariance (ny, ny) or scalar
             x_eq: Equilibrium state
-        
+
         Returns:
             L: Kalman gain matrix (nx, ny)
         """
@@ -1518,47 +1581,50 @@ class GenericDiscreteTimeSystem(nn.Module):
             R_measurement = np.eye(self.continuous_time_system.ny) * 1e-3
         if x_eq is None:
             x_eq = self.x_equilibrium
-        
+
         # Ensure proper shape
         if len(x_eq.shape) == 1:
             x_eq = x_eq.unsqueeze(0)
-        
+
         # Get discrete linearized dynamics
         u_eq = self.u_equilibrium
         if len(u_eq.shape) == 1:
             u_eq = u_eq.unsqueeze(0)
-        
+
         Ad, _ = self.linearized_dynamics(x_eq, u_eq)
         Ad = Ad.squeeze().detach().cpu().numpy()
-        
+
         C = self.continuous_time_system.linearized_observation(x_eq)
         C = C.squeeze().detach().cpu().numpy()
-        
+
         # Ensure C is 2D
         if C.ndim == 1:
             C = C.reshape(1, -1)
-        
+
         # Ensure R_measurement is 2D
         if isinstance(R_measurement, (int, float)):
             R_measurement = np.array([[R_measurement]])
         elif R_measurement.ndim == 1:
             R_measurement = np.diag(R_measurement)
-        
+
         # Solve discrete-time algebraic Riccati equation (dual problem)
         P = scipy.linalg.solve_discrete_are(Ad.T, C.T, Q_process, R_measurement)
-        
+
         # Compute Kalman gain
         L = P @ C.T @ np.linalg.inv(C @ P @ C.T + R_measurement)
-        
+
         return L
 
-
-    def dlqg_control(self, Q_lqr: np.ndarray, R_lqr: np.ndarray,
-                    Q_process: Optional[np.ndarray] = None,
-                    R_measurement: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+    def dlqg_control(
+        self,
+        Q_lqr: np.ndarray,
+        R_lqr: np.ndarray,
+        Q_process: Optional[np.ndarray] = None,
+        R_measurement: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute discrete-time LQG controller
-        
+
         Returns:
             (K, L): Control gain and observer gain
         """
@@ -1566,78 +1632,202 @@ class GenericDiscreteTimeSystem(nn.Module):
         L = self.discrete_kalman_gain(Q_process, R_measurement)
         return K, L
 
-
     def dlqg_closed_loop_matrix(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
         Compute closed-loop discrete system matrix for LQG control
-        
+
         Args:
             K: Discrete LQR control gain (nu, nx)
             L: Discrete Kalman filter gain (nx, ny)
-        
+
         Returns:
             A_cl: Closed-loop system matrix (2*nx, 2*nx)
         """
         x_eq = self.x_equilibrium.unsqueeze(0)
         u_eq = self.u_equilibrium.unsqueeze(0)
-        
+
         Ad, Bd = self.linearized_dynamics(x_eq, u_eq)
         Ad = Ad.squeeze().detach().cpu().numpy()
         Bd = Bd.squeeze().detach().cpu().numpy()
-        
+
         # Ensure Bd is 2D (nx, nu)
         if Bd.ndim == 1:
             Bd = Bd.reshape(-1, 1)
-        
+
         C = self.continuous_time_system.linearized_observation(x_eq)
         C = C.squeeze().detach().cpu().numpy()
-        
+
         # Ensure C is 2D (ny, nx)
         if C.ndim == 1:
             C = C.reshape(1, -1)
-        
+
         # Ensure K is 2D (nu, nx)
         if K.ndim == 1:
             K = K.reshape(1, -1)
-        
+
         # Ensure L is 2D (nx, ny)
         if L.ndim == 1:
             L = L.reshape(-1, 1)
-        
+
         # Closed-loop discrete system: [x[k], x̂[k]]
         # x[k+1] = Ad @ x[k] + Bd @ K @ x̂[k]
         # x̂[k+1] = Ad @ x̂[k] + Bd @ K @ x̂[k] + L @ (C @ x[k] - C @ x̂[k])
         #         = (Ad + Bd @ K - L @ C) @ x̂[k] + L @ C @ x[k]
-        A_cl = np.vstack([
-            np.hstack([Ad + Bd @ K, -Bd @ K]),                    # x[k+1]
-            np.hstack([L @ C, Ad + Bd @ K - L @ C])              # x̂[k+1]
-        ])
-        
+        A_cl = np.vstack(
+            [
+                np.hstack([Ad + Bd @ K, -Bd @ K]),  # x[k+1]
+                np.hstack([L @ C, Ad + Bd @ K - L @ C]),  # x̂[k+1]
+            ]
+        )
+
         # Clean up near-zero entries
         A_cl[np.abs(A_cl) <= 1e-6] = 0
-        
-        return A_cl
 
+        return A_cl
 
     def output_feedback_lyapunov(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
         Solve discrete-time Lyapunov equation for output feedback system
-        
+
         For verifying stability of the closed-loop system
-        
+
         Args:
             K: Control gain
             L: Observer gain
-        
+
         Returns:
             S: Solution to discrete Lyapunov equation
         """
         import control
-        
+
         A_cl = self.dlqg_closed_loop_matrix(K, L)
         S = control.dlyap(A_cl, np.eye(2 * self.nx))
-        
+
         return S
+
+    def __call__(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """Make the discrete system callable"""
+        return self.forward(x, u)
+
+    def print_info(
+        self, include_equations: bool = True, include_linearization: bool = True
+    ):
+        """
+        Print comprehensive information about the discrete-time system
+
+        Args:
+            include_equations: Whether to print symbolic equations
+            include_linearization: Whether to print linearization at equilibrium
+        """
+        print("=" * 70)
+        print(f"Discrete-Time System: {self.continuous_time_system.__class__.__name__}")
+        print("=" * 70)
+
+        # Basic info
+        print(f"\nDiscretization:")
+        print(f"  Time step (dt):        {self.dt}")
+        print(f"  Integration method:    {self.integration_method.name}")
+        if self.order > 1:
+            print(f"  Position integration:  {self.position_integration.name}")
+
+        print(f"\nDimensions:")
+        print(f"  State dimension (nx):    {self.nx}")
+        print(f"  Control dimension (nu):  {self.nu}")
+        print(f"  Output dimension (ny):   {self.continuous_time_system.ny}")
+        print(f"  System order:            {self.order}")
+        if self.order > 1:
+            print(f"  Generalized coords (nq): {self.continuous_time_system.nq}")
+
+        print(f"\nEquilibrium:")
+        x_eq = self.x_equilibrium.detach().cpu().numpy()
+        u_eq = self.u_equilibrium.detach().cpu().numpy()
+        print(f"  x_eq = {x_eq}")
+        print(f"  u_eq = {u_eq}")
+
+        # Symbolic equations from continuous system
+        if include_equations:
+            print("\n" + "-" * 70)
+            print("Continuous-Time Dynamics (before discretization):")
+            print("-" * 70)
+            self.continuous_time_system.print_equations(simplify=True)
+
+        # Linearization at equilibrium
+        if include_linearization:
+            print("\n" + "-" * 70)
+            print("Linearization at Equilibrium:")
+            print("-" * 70)
+
+            # Continuous-time linearization
+            Ac, Bc = self.continuous_time_system.linearized_dynamics(
+                self.x_equilibrium.unsqueeze(0), self.u_equilibrium.unsqueeze(0)
+            )
+            Ac_np = Ac.squeeze().detach().cpu().numpy()
+            Bc_np = Bc.squeeze().detach().cpu().numpy()
+
+            print("Continuous-time (Ac, Bc):")
+            print(f"  Ac =\n{Ac_np}")
+            print(f"  Bc =\n{Bc_np}")
+
+            # Discrete-time linearization
+            Ad, Bd = self.linearized_dynamics(
+                self.x_equilibrium.unsqueeze(0), self.u_equilibrium.unsqueeze(0)
+            )
+            Ad_np = Ad.squeeze().detach().cpu().numpy()
+            Bd_np = Bd.squeeze().detach().cpu().numpy()
+
+            print(f"\nDiscrete-time (Ad, Bd) with dt={self.dt}:")
+            print(f"  Ad =\n{Ad_np}")
+            print(f"  Bd =\n{Bd_np}")
+
+            # Eigenvalues
+            eigs_c = np.linalg.eigvals(Ac_np)
+            eigs_d = np.linalg.eigvals(Ad_np)
+
+            print(f"\nEigenvalues:")
+            print(f"  Continuous: {eigs_c}")
+            print(f"  Discrete:   {eigs_d}")
+            print(f"\nStability:")
+            print(f"  Continuous stable? {np.all(np.real(eigs_c) < 0)}")
+            print(f"  Discrete stable?   {np.all(np.abs(eigs_d) < 1)}")
+
+            # Observation matrix
+            C = self.linearized_observation(self.x_equilibrium.unsqueeze(0))
+            C_np = C.squeeze().detach().cpu().numpy()
+            print(f"\nObservation matrix C:")
+            print(f"  C =\n{C_np}")
+
+        print("=" * 70)
+
+    def summary(self) -> str:
+        """
+        Get a brief summary string
+
+        Returns:
+            Summary string with key system info
+        """
+        ct_stable = self.continuous_time_system.is_stable_equilibrium(
+            discrete_time=False
+        )
+
+        # Check discrete stability
+        eigs_d = np.linalg.eigvals(
+            self.linearized_dynamics(
+                self.x_equilibrium.unsqueeze(0), self.u_equilibrium.unsqueeze(0)
+            )[0]
+            .squeeze()
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        dt_stable = bool(np.all(np.abs(eigs_d) < 1))
+
+        summary_str = (
+            f"{self.continuous_time_system.__class__.__name__} "
+            f"(nx={self.nx}, nu={self.nu}, ny={self.continuous_time_system.ny}, "
+            f"order={self.order}, dt={self.dt:.4f}, {self.integration_method.name})\n"
+            f"  Continuous stable: {ct_stable}, Discrete stable: {dt_stable}"
+        )
+        return summary_str
 
     def plot_trajectory(
         self,
@@ -1887,18 +2077,19 @@ class GenericDiscreteTimeSystem(nn.Module):
 
         return fig
 
+
 class ExtendedKalmanFilter:
     """
     Extended Kalman Filter for nonlinear systems
-    
-    Works with both SymbolicDynamicalSystem (continuous) and 
+
+    Works with both SymbolicDynamicalSystem (continuous) and
     GenericDiscreteTimeSystem (discrete)
     """
-    
+
     def __init__(self, system, Q_process: np.ndarray, R_measurement: np.ndarray):
         """
         Initialize EKF
-        
+
         Args:
             system: SymbolicDynamicalSystem or GenericDiscreteTimeSystem
             Q_process: Process noise covariance (nx, nx)
@@ -1907,17 +2098,17 @@ class ExtendedKalmanFilter:
         self.system = system
         self.Q = Q_process
         self.R = R_measurement
-        
+
         # State estimate and covariance
         self.x_hat = system.x_equilibrium.clone()
         self.P = torch.eye(system.nx) * 0.1
-        
-        self.is_discrete = hasattr(system, 'continuous_time_system')
-    
+
+        self.is_discrete = hasattr(system, "continuous_time_system")
+
     def predict(self, u: torch.Tensor, dt: Optional[float] = None):
         """
         Prediction step
-        
+
         Args:
             u: Control input
             dt: Time step (required for continuous systems)
@@ -1926,7 +2117,7 @@ class ExtendedKalmanFilter:
             # Discrete system: x̂[k+1|k] = f(x̂[k|k], u[k])
             with torch.no_grad():
                 self.x_hat = self.system(self.x_hat, u)
-            
+
             # Propagate covariance: P[k+1|k] = A P[k|k] A^T + Q
             A, _ = self.system.linearized_dynamics(
                 self.x_hat.unsqueeze(0), u.unsqueeze(0)
@@ -1936,47 +2127,49 @@ class ExtendedKalmanFilter:
             # Continuous system: integrate forward
             if dt is None:
                 raise ValueError("dt required for continuous systems")
-            
+
             with torch.no_grad():
                 dx = self.system.forward(self.x_hat, u)
                 self.x_hat = self.x_hat + dx * dt
-            
+
             A, _ = self.system.linearized_dynamics(
                 self.x_hat.unsqueeze(0), u.unsqueeze(0)
             )
             A = A.squeeze()
             A = torch.eye(self.system.nx) + A * dt  # Euler discretization
-        
+
         Q_tensor = torch.tensor(self.Q, dtype=self.P.dtype, device=self.P.device)
         self.P = A @ self.P @ A.T + Q_tensor
-    
+
     def update(self, y_measurement: torch.Tensor):
         """
         Update step (correction)
-        
+
         Args:
             y_measurement: Actual measurement
         """
         # Ensure y_measurement is 1D
         if len(y_measurement.shape) == 0:
             y_measurement = y_measurement.unsqueeze(0)
-        
+
         # Predicted measurement
         with torch.no_grad():
             if self.is_discrete:
-                y_pred = self.system.continuous_time_system.h(self.x_hat.unsqueeze(0)).squeeze()
+                y_pred = self.system.continuous_time_system.h(
+                    self.x_hat.unsqueeze(0)
+                ).squeeze()
             else:
                 y_pred = self.system.h(self.x_hat.unsqueeze(0)).squeeze()
-        
+
         # Ensure y_pred is 1D
         if len(y_pred.shape) == 0:
             y_pred = y_pred.unsqueeze(0)
-        
+
         # Measurement residual (innovation)
         innovation = y_measurement - y_pred
         if len(innovation.shape) == 0:
             innovation = innovation.unsqueeze(0)
-        
+
         # Get measurement Jacobian
         if self.is_discrete:
             C = self.system.continuous_time_system.linearized_observation(
@@ -1984,34 +2177,40 @@ class ExtendedKalmanFilter:
             ).squeeze()
         else:
             C = self.system.linearized_observation(self.x_hat.unsqueeze(0)).squeeze()
-        
+
         # Ensure C is 2D (ny, nx)
         if len(C.shape) == 1:
             C = C.unsqueeze(0)  # (ny, nx)
-        
+
         # Innovation covariance: S = C P C^T + R
         R_tensor = torch.tensor(self.R, dtype=self.P.dtype, device=self.P.device)
         S = C @ self.P @ C.mT + R_tensor  # Use .mT for matrix transpose
-        
+
         # Ensure S is 2D
         if len(S.shape) == 0:
             S = S.unsqueeze(0).unsqueeze(0)
         elif len(S.shape) == 1:
             S = S.unsqueeze(0)
-        
+
         # Kalman gain: K = P C^T S^{-1}
         Kt = self.P @ C.mT @ torch.inverse(S)  # (nx, ny)
-        
+
         # Update state estimate: x̂ = x̂ + K * innovation
         correction = (Kt @ innovation.unsqueeze(-1)).squeeze(-1)
         self.x_hat = self.x_hat + correction
-        
+
         # Update covariance: P = (I - K C) P
-        nx = self.system.nx if not self.is_discrete else self.system.continuous_time_system.nx
+        nx = (
+            self.system.nx
+            if not self.is_discrete
+            else self.system.continuous_time_system.nx
+        )
         I = torch.eye(nx, device=self.P.device, dtype=self.P.dtype)
         self.P = (I - Kt @ C) @ self.P
-    
-    def reset(self, x0: Optional[torch.Tensor] = None, P0: Optional[torch.Tensor] = None):
+
+    def reset(
+        self, x0: Optional[torch.Tensor] = None, P0: Optional[torch.Tensor] = None
+    ):
         """Reset filter state"""
         if x0 is not None:
             self.x_hat = x0.clone()
@@ -2020,18 +2219,23 @@ class ExtendedKalmanFilter:
                 self.x_hat = self.system.x_equilibrium.clone()
             else:
                 self.x_hat = self.system.x_equilibrium.clone()
-        
+
         if P0 is not None:
             self.P = P0.clone()
         else:
-            nx = self.system.nx if not self.is_discrete else self.system.continuous_time_system.nx
+            nx = (
+                self.system.nx
+                if not self.is_discrete
+                else self.system.continuous_time_system.nx
+            )
             self.P = torch.eye(nx) * 0.1
+
 
 class LinearController:
     """
     Linear state feedback controller: u = K @ (x - x_eq) + u_eq
     """
-    
+
     def __init__(self, K: np.ndarray, x_eq: torch.Tensor, u_eq: torch.Tensor):
         """
         Args:
@@ -2042,7 +2246,7 @@ class LinearController:
         self.K = torch.tensor(K, dtype=torch.float32)
         self.x_eq = x_eq
         self.u_eq = u_eq
-    
+
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         """Compute control input"""
         if len(x.shape) == 1:
@@ -2050,14 +2254,14 @@ class LinearController:
             squeeze = True
         else:
             squeeze = False
-        
+
         u = self.u_eq + (self.K @ (x - self.x_eq).T).T
-        
+
         if squeeze:
             u = u.squeeze(0)
-        
+
         return u
-    
+
     def to(self, device):
         """Move to device"""
         self.K = self.K.to(device)
@@ -2070,7 +2274,7 @@ class LinearObserver:
     """
     Linear observer: dx̂/dt = A x̂ + B u + L(y - C x̂)
     """
-    
+
     def __init__(self, system, L: np.ndarray):
         """
         Args:
@@ -2080,11 +2284,11 @@ class LinearObserver:
         self.system = system
         self.L = torch.tensor(L, dtype=torch.float32)
         self.x_hat = system.x_equilibrium.clone()
-    
+
     def update(self, u: torch.Tensor, y: torch.Tensor, dt: float):
         """
         Update observer state
-        
+
         Args:
             u: Control input
             y: Measurement
@@ -2092,27 +2296,31 @@ class LinearObserver:
         """
         # Predict
         with torch.no_grad():
-            if hasattr(self.system, 'continuous_time_system'):
+            if hasattr(self.system, "continuous_time_system"):
                 # Discrete system
                 x_pred = self.system(self.x_hat.unsqueeze(0), u.unsqueeze(0)).squeeze(0)
-                y_pred = self.system.continuous_time_system.h(x_pred.unsqueeze(0)).squeeze(0)
+                y_pred = self.system.continuous_time_system.h(
+                    x_pred.unsqueeze(0)
+                ).squeeze(0)
             else:
                 # Continuous system
-                dx = self.system.forward(self.x_hat.unsqueeze(0), u.unsqueeze(0)).squeeze(0)
+                dx = self.system.forward(
+                    self.x_hat.unsqueeze(0), u.unsqueeze(0)
+                ).squeeze(0)
                 x_pred = self.x_hat + dx * dt
                 y_pred = self.system.h(x_pred.unsqueeze(0)).squeeze(0)
-            
+
             # Correct
             innovation = y - y_pred
             self.x_hat = x_pred + (self.L @ innovation.unsqueeze(-1)).squeeze(-1)
-    
+
     def reset(self, x0: Optional[torch.Tensor] = None):
         """Reset observer state"""
         if x0 is not None:
             self.x_hat = x0.clone()
         else:
             self.x_hat = self.system.x_equilibrium.clone()
-    
+
     def to(self, device):
         """Move to device"""
         self.L = self.L.to(device)
