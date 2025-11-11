@@ -97,6 +97,34 @@ class SymbolicPendulumState(SymbolicDynamicalSystem):
             """For backward compatibility"""
             return self.inertia_val
 
+class SymbolicPendulum2ndOrder(SymbolicDynamicalSystem):
+    """Second-order formulation (returns only acceleration)"""
+    
+    def __init__(self, m=1.0, l=1.0, beta=1.0, g=9.81):
+        super().__init__()
+        self.order = 2  # ← SECOND-ORDER
+        self.m_val = m
+        self.l_val = l
+        self.beta_val = beta
+        self.g_val = g
+        self.inertia_val = m * l**2
+        self.define_system(m, l, beta, g)
+    
+    def define_system(self, m_val, l_val, beta_val, g_val):
+        theta, theta_dot = sp.symbols("theta theta_dot", real=True)
+        u = sp.symbols("u", real=True)
+        m, l, beta, g = sp.symbols("m l beta g", real=True, positive=True)
+        
+        self.parameters = {m: m_val, l: l_val, beta: beta_val, g: g_val}
+        self.state_vars = [theta, theta_dot]
+        self.control_vars = [u]
+        
+        ml2 = m * l * l
+        # For 2nd order, return ONLY acceleration
+        theta_ddot = (-beta / ml2) * theta_dot + (g / l) * sp.sin(theta) + u / ml2
+        
+        self._f_sym = sp.Matrix([theta_ddot])  # ← Only acceleration
+
 
 class SymbolicQuadrotor2D(SymbolicDynamicalSystem):
     """
