@@ -126,11 +126,11 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
-    pendulum_continuous = ss.SymbolicPendulumState(m=0.15, l=0.5, beta=0.1, g=9.81)
+    pendulum_continuous = ss.SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
     dynamics = sd.GenericDiscreteTimeSystem(
         pendulum_continuous,
         dt=dt,
-        integration_method=sd.IntegrationMethod[cfg.model.velocity_integration],
+        integration_method=sd.IntegrationMethod[cfg.model.position_integration],
     )
 
     controller = controllers.NeuralNetworkController(
@@ -444,8 +444,9 @@ def main(cfg: DictConfig):
         title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
         save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
         show=False,
+        show_derivative=True,
     )
-    
+
     pass
 
 
