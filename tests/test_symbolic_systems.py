@@ -9,16 +9,17 @@ import control
 import warnings
 from neural_lyapunov_training.symbolic_dynamics import (
     SYMPY_TO_TORCH,
-    SymbolicPendulum,
     GenericDiscreteTimeSystem,
-    IntegrationMethod
+    IntegrationMethod,
+)
+from neural_lyapunov_training.symbolic_systems import (
+    SymbolicPendulum,
+    SymbolicPendulumState,
 )
 
 
 def test_sympy_to_torch_mapping():
     """Test that SYMPY_TO_TORCH mapping works correctly"""
-    import sympy as sp
-    import torch
 
     print("Testing SymPy to PyTorch function mapping...")
 
@@ -77,9 +78,9 @@ if __name__ == "__main__":
 
     # Test a system
     print("\n" + "=" * 70)
-    print("Testing SymbolicPendulum")
+    print("Testing SymbolicPendulumState")
     print("=" * 70)
-    pendulum = SymbolicPendulum()
+    pendulum = SymbolicPendulumState(m=0.15, l=0.5, beta=0.1, g=9.81)
     pendulum.print_equations()
 
     discrete_pendulum = GenericDiscreteTimeSystem(

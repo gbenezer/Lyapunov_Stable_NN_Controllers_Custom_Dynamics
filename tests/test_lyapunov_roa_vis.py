@@ -5,18 +5,18 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import torch.nn as nn
 from neural_lyapunov_training.symbolic_dynamics import (
-    SymbolicPendulum,
     GenericDiscreteTimeSystem,
     IntegrationMethod,
 )
+from neural_lyapunov_training.symbolic_systems import SymbolicPendulum
 import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+
 
 # Example usage function
 def demo_lyapunov_visualization():
     """
     Demonstrate Lyapunov visualization with a simple example
     """
-    
 
     # Create simple neural networks for demonstration
     class SimpleLyapunov(nn.Module):
@@ -69,7 +69,7 @@ def demo_lyapunov_visualization():
         show=False,
     )
 
-    # 3D surface plot
+    # 3D surface plot - just V(x)
     lrv.plot_lyapunov_3d_surface(
         lyap_nn,
         state_limits=((-1.0, 1.0), (-2.0, 2.0)),
@@ -81,42 +81,28 @@ def demo_lyapunov_visualization():
         show=False,
     )
 
-    # Comprehensive ROA analysis
-    lrv.plot_roa_analysis(
+    # 3D surface plot with derivative - V(x) and ΔV(x) side by side
+    lrv.plot_lyapunov_3d_surface(
         lyap_nn,
-        controller_nn,
-        discrete_pendulum,
         state_limits=((-1.0, 1.0), (-2.0, 2.0)),
+        controller_nn=controller_nn,
+        dynamics_system=discrete_pendulum,
         state_names=("theta (rad)", "omega (rad/s)"),
         rho=1.0,
-        num_trajectories=8,
-        save_html="roa_analysis.html",
+        nx=2,
+        x_equilibrium=pendulum.x_equilibrium,
+        save_html="lyapunov_3d_with_derivative.html",
         show=False,
-    )
-
-    # Animated trajectory
-    x0 = torch.tensor([0.8, 0.5])
-    lrv.plot_lyapunov_animation(
-        lyap_nn,
-        controller_nn,
-        discrete_pendulum,
-        x0,
-        num_steps=200,
-        state_limits=((-1.0, 1.0), (-2.0, 2.0)),
-        state_names=("theta (rad)", "omega (rad/s)"),
-        rho=1.0,
-        save_html="lyapunov_animation.html",
-        show=False,
+        show_derivative=True,
     )
 
     print("\n✓ All visualizations generated!")
     print("  - lyapunov_2d.html: 2D contour plot with ROA")
-    print("  - lyapunov_3d.html: 3D surface plot")
-    print("  - roa_analysis.html: Comprehensive 4-panel analysis")
-    print("  - lyapunov_animation.html: Animated trajectory")
+    print("  - lyapunov_3d.html: 3D surface plot of V(x)")
+    print("  - lyapunov_3d_with_derivative.html: 3D surfaces of V(x) and ΔV(x)")
     print("\nOpen these HTML files in your browser!")
 
-    
+
 if __name__ == "__main__":
     # Run demo if this file is executed
     print("Run demo_lyapunov_visualization() to see examples")
