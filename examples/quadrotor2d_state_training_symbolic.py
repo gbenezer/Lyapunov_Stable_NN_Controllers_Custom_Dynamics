@@ -19,6 +19,9 @@ import neural_lyapunov_training.quadrotor2d as quadrotor2d
 import neural_lyapunov_training.symbolic_dynamics as sd
 import neural_lyapunov_training.train_utils as train_utils
 import neural_lyapunov_training.output_train_utils as output_train_utils
+import neural_lyapunov_training.symbolic_dynamics as sd
+import neural_lyapunov_training.symbolic_systems as ss
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
 
 device = torch.device("cuda")
 dtype = torch.float
@@ -98,12 +101,12 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     dt = 0.01
-    quadrotor_continuous = sd.SymbolicQuadrotor2D()
+    quadrotor_continuous = ss.SymbolicQuadrotor2DState()
     dynamics = sd.GenericDiscreteTimeSystem(
         quadrotor_continuous,
         dt,
-        integration_method=sd.IntegrationMethod[cfg.model.velocity_integration],
-        position_integration=sd.IntegrationMethod[cfg.model.position_integration],
+        integration_method=sd.IntegrationMethod["RK4"],
+        position_integration=sd.IntegrationMethod["RK4"],
     )
 
     grid_size = torch.tensor([4, 4, 6, 5, 5, 6], device=device)
@@ -313,6 +316,13 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
     else:
         limit = cfg.model.limit_scale[-1] * limit_x
         lower_limit = -limit
@@ -415,6 +425,7 @@ def main(cfg: DictConfig):
                 os.getcwd(), f"V_{kappa}_{candidate_scale}_roa_{str(plot_idx)}.png"
             )
         )
+    
 
 
 if __name__ == "__main__":
