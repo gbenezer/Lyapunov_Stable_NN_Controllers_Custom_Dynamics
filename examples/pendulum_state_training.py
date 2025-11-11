@@ -204,6 +204,7 @@ def main(cfg: DictConfig):
     # approximate_controller(lyapunov_target, lyapunov_nn, 2, limit, 0, 0, "examples/pendulum_lyapunov.pth", batch_size=10000, max_iter=500)
     logger = logging.getLogger(__name__)
     if cfg.approximate_lqr:
+
         approximate_lqr(
             pendulum_continuous, controller, lyapunov_nn, upper_limit, logger
         )
@@ -439,6 +440,7 @@ def main(cfg: DictConfig):
         title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
         save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
         show=False,
+        show_derivative=True,
     )
 
     pass
