@@ -29,6 +29,17 @@ class ROAMetrics:
     discrepancy: Optional[float] = None  # For QMC methods
 
 
+# Convert state_limits to CPU numpy if they're tensors
+def to_float(val):
+    """Convert tensor or array to float"""
+    if isinstance(val, torch.Tensor):
+        return val.detach().cpu().item()
+    elif isinstance(val, (np.ndarray, np.generic)):
+        return float(val)
+    else:
+        return float(val)
+
+
 def round_to_power_of_2(n: int, direction: str = "nearest") -> int:
     """
     Round number to nearest power of 2
@@ -219,6 +230,10 @@ def compute_roa_area_qmc_sobol(
     Returns:
         ROAMetrics object with area measurements
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
@@ -251,8 +266,11 @@ def compute_roa_area_qmc_sobol(
         num_samples, n_dims, bounds_for_sobol, device, round_to_pow2
     )
 
-    # Create full state samples
-    samples = torch.zeros((num_samples, nx_total), device=device)
+    ## CRITICAL FIX: Use actual number of samples generated, not requested
+    num_samples_actual = sobol_samples.shape[0]
+
+    # Create full state samples with correct size
+    samples = torch.zeros((num_samples_actual, nx_total), device=device)
     for i, idx in enumerate(state_indices):
         samples[:, idx] = sobol_samples[:, i]
 
@@ -264,14 +282,14 @@ def compute_roa_area_qmc_sobol(
     in_roa = (V_values <= rho).sum().item()
 
     # Estimate ROA volume
-    roa_volume = domain_volume * (in_roa / num_samples)
-    coverage_ratio = in_roa / num_samples
+    roa_volume = domain_volume * (in_roa / num_samples_actual)
+    coverage_ratio = in_roa / num_samples_actual
 
     # Optionally compute discrepancy
     discrepancy_val = None
     if compute_discrepancy_metric:
         # Normalize samples to [0,1]^d for discrepancy computation
-        samples_normalized = np.zeros((num_samples, n_dims))
+        samples_normalized = np.zeros((num_samples_actual, n_dims))
         for i, idx in enumerate(state_indices):
             low, high = state_limits[idx]
             samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (
@@ -290,7 +308,7 @@ def compute_roa_area_qmc_sobol(
         area_domain=domain_volume,
         coverage_ratio=coverage_ratio,
         num_samples_in_roa=in_roa,
-        num_samples_total=num_samples,
+        num_samples_total=num_samples_actual,  # Use actual count
         domain_bounds=state_limits,
         method="qmc_sobol",
         discrepancy=discrepancy_val,
@@ -325,6 +343,10 @@ def compute_roa_area_qmc_halton(
     Returns:
         ROAMetrics object with area measurements
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
@@ -424,6 +446,10 @@ def compute_roa_area_monte_carlo(
     Returns:
         ROAMetrics object with area measurements
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
@@ -507,12 +533,16 @@ def compute_roa_area_grid(
     Returns:
         ROAMetrics object with area measurements
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     idx0, idx1 = state_indices
 
     # Create grid
     x0_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
     x1_range = np.linspace(state_limits[1][0], state_limits[1][1], grid_resolution)
-    X0, X1 = np.meshgrid(x0_range, x1_range)
+    X0, X1 = np.meshgrid(x0_range, x1_range, indexing='ij')
 
     # Cell area
     dx0 = (state_limits[0][1] - state_limits[0][0]) / grid_resolution
@@ -591,6 +621,10 @@ def compute_roa_volume_nd(
     Returns:
         ROAMetrics with volume computation
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     n_dims = len(state_limits)
 
     # Warn for high-dimensional cases
@@ -679,6 +713,10 @@ def estimate_rho_from_boundary(
     Returns:
         Estimated rho value
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     n_dims = len(state_limits)
 
     # Sample points on each face of the hyperrectangle boundary
@@ -745,6 +783,10 @@ def compare_roa_metrics(
     Returns:
         Dict with metrics from different methods
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     results = {}
 
     # Random Monte Carlo
@@ -854,6 +896,10 @@ def compute_roa_area_with_controller(
     Returns:
         Dict with metrics and verification results
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     # Auto-compute rho if not provided
     if rho is None:
         print("Estimating rho from boundary...")
@@ -914,7 +960,7 @@ def compute_roa_area_with_controller(
             x1_range = np.linspace(
                 state_limits[1][0], state_limits[1][1], grid_resolution
             )
-            X0, X1 = np.meshgrid(x0_range, x1_range)
+            X0, X1 = np.meshgrid(x0_range, x1_range, indexing="ij")
 
             nx_total = dynamics_system.nx
             samples = torch.zeros((grid_resolution**2, nx_total), device=device)
@@ -997,6 +1043,10 @@ def compare_roa_sizes(
     Returns:
         Dict of {name: ROAMetrics}
     """
+
+    # convert to floats if not already floats
+    state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
+
     results = {}
 
     for name, lyap_nn in lyapunov_models.items():
