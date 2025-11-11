@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch
 import neural_lyapunov_training.controllers as controllers
 import neural_lyapunov_training.dynamical_system as dynamical_system
+import neural_lyapunov_training.symbolic_dynamics as sd
 
 
 def soft_max(x: torch.Tensor, beta: float = 100):
@@ -90,9 +91,11 @@ class NeuralNetworkLyapunov(nn.Module):
                 layers.append(
                     nn.Linear(
                         in_features=width,
-                        out_features=hidden_widths[layer + 1]
-                        if layer != len(hidden_widths) - 1
-                        else 1,
+                        out_features=(
+                            hidden_widths[layer + 1]
+                            if layer != len(hidden_widths) - 1
+                            else 1
+                        ),
                     )
                 )
             for l in layers:
@@ -258,14 +261,14 @@ class NeuralNetworkQuadraticLyapunov(nn.Module):
         else:
             x_d2 = x_next - (1 - kappa) * x
         x_s = x_next + sqrt_1_minus_kappa * x
-        Q = (
-            self.eps * torch.eye(self.x_dim, device=x.device)
-            + (self.R.transpose(0, 1) @ self.R)
+        Q = self.eps * torch.eye(self.x_dim, device=x.device) + (
+            self.R.transpose(0, 1) @ self.R
         )
         dV = (
             torch.sum(x_d1 * (x_s @ Q), axis=-1, keepdim=True)
             - 2 * torch.sum(x_d2 * (self.goal_state @ Q), axis=-1, keepdim=True)
-            + kappa * torch.sum(self.goal_state * (self.goal_state @ Q), axis=-1, keepdim=True)
+            + kappa
+            * torch.sum(self.goal_state * (self.goal_state @ Q), axis=-1, keepdim=True)
         )
         return dV
 
@@ -320,7 +323,7 @@ class LyapunovDerivativeSimpleLoss(nn.Module):
 
     def __init__(
         self,
-        dynamics: dynamical_system.DiscreteTimeSystem,
+        dynamics: dynamical_system.DiscreteTimeSystem | sd.GenericDiscreteTimeSystem,
         controller: controllers.NeuralNetworkController,
         lyap_nn: NeuralNetworkLyapunov,
         kappa: float = 0.1,
@@ -385,7 +388,7 @@ class LyapunovDerivativeLoss(nn.Module):
 
     def __init__(
         self,
-        dynamics: dynamical_system.DiscreteTimeSystem,
+        dynamics: dynamical_system.DiscreteTimeSystem | sd.GenericDiscreteTimeSystem,
         controller: controllers.NeuralNetworkController,
         lyap_nn: NeuralNetworkLyapunov,
         box_lo: torch.Tensor,
@@ -494,7 +497,7 @@ class LyapunovDerivativeDOFLoss(nn.Module):
 
     def __init__(
         self,
-        dynamics: dynamical_system.DiscreteTimeSystem,
+        dynamics: dynamical_system.DiscreteTimeSystem | sd.GenericDiscreteTimeSystem,
         observer,
         controller: controllers.NeuralNetworkController,
         lyap_nn: NeuralNetworkLyapunov,
@@ -573,6 +576,7 @@ class LyapunovDerivativeDOFLoss(nn.Module):
             loss = soft_min(torch.cat((loss1, loss23), dim=-1), self.beta)
             return -loss
 
+
 class LyapunovDerivativeDOFSimpleLoss(nn.Module):
     """
     Lyapunov derivative loss for dynamic output feedback.
@@ -580,17 +584,19 @@ class LyapunovDerivativeDOFSimpleLoss(nn.Module):
     V(x, e), e = x - z
     """
 
-    def __init__(self,
-                 dynamics: dynamical_system.DiscreteTimeSystem,
-                 observer,
-                 controller: controllers.NeuralNetworkController,
-                 lyap_nn: NeuralNetworkLyapunov,
-                 kappa=0.1,
-                 beta: float = 100,
-                 hard_max: bool = True,
-                 fuse_dV: bool = False,
-                 *args,
-                 **kwargs):
+    def __init__(
+        self,
+        dynamics: dynamical_system.DiscreteTimeSystem | sd.GenericDiscreteTimeSystem,
+        observer,
+        controller: controllers.NeuralNetworkController,
+        lyap_nn: NeuralNetworkLyapunov,
+        kappa=0.1,
+        beta: float = 100,
+        hard_max: bool = True,
+        fuse_dV: bool = False,
+        *args,
+        **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.dynamics = dynamics
         self.observer = observer
@@ -605,8 +611,8 @@ class LyapunovDerivativeDOFSimpleLoss(nn.Module):
 
     def forward(self, xe):
         # Run the system by one step with dt.
-        x = xe[:, :self.nx]
-        e = xe[:, self.nx:]
+        x = xe[:, : self.nx]
+        e = xe[:, self.nx :]
         z = x - e
         y = self.observer.h(x)
         ey = y - self.observer.h(z)
@@ -853,7 +859,7 @@ class ObserverLoss(nn.Module):
 
     def __init__(
         self,
-        dynamics: dynamical_system.DiscreteTimeSystem,
+        dynamics: dynamical_system.DiscreteTimeSystem | sd.GenericDiscreteTimeSystem,
         observer,
         controller,
         ekf_observer,
