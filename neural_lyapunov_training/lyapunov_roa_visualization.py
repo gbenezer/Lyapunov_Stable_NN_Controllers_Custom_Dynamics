@@ -14,6 +14,16 @@ from typing import Optional, Tuple, List, Callable
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# Convert state_limits to CPU numpy if they're tensors
+def to_float(val):
+    """Convert tensor or array to float"""
+    if isinstance(val, torch.Tensor):
+        return val.detach().cpu().item()
+    elif isinstance(val, (np.ndarray, np.generic)):
+        return float(val)
+    else:
+        return float(val)
+
 def plot_lyapunov_2d(
     lyapunov_nn,
     controller_nn,
@@ -52,15 +62,6 @@ def plot_lyapunov_2d(
     Returns:
         Plotly figure object
     """
-    # Convert state_limits to CPU numpy if they're tensors
-    def to_float(val):
-        """Convert tensor or array to float"""
-        if isinstance(val, torch.Tensor):
-            return val.detach().cpu().item()
-        elif isinstance(val, (np.ndarray, np.generic)):
-            return float(val)
-        else:
-            return float(val)
     
     state_limits = tuple(
         (to_float(lim[0]), to_float(lim[1])) for lim in state_limits
@@ -302,282 +303,6 @@ def plot_lyapunov_2d(
         fig.show()
     
     return fig
-
-
-# def plot_lyapunov_2d(
-#     lyapunov_nn,
-#     controller_nn,
-#     dynamics_system,
-#     state_limits: Tuple[Tuple[float, float], Tuple[float, float]],
-#     state_indices: Tuple[int, int] = (0, 1),
-#     state_names: Optional[Tuple[str, str]] = None,
-#     rho: Optional[float] = None,
-#     grid_resolution: int = 100,
-#     observer_nn = None,
-#     trajectories: Optional[List[torch.Tensor]] = None,
-#     title: Optional[str] = None,
-#     save_html: Optional[str] = None,
-#     show: bool = True,
-#     colorscale: str = 'Viridis'
-# ):
-#     """
-#     Plot Lyapunov function value field and Region of Attraction in 2D
-    
-#     Args:
-#         lyapunov_nn: Neural network Lyapunov function V(x)
-#         controller_nn: Neural network controller u = π(x) or π(x̂)
-#         dynamics_system: Dynamical system (GenericDiscreteTimeSystem)
-#         state_limits: ((x_min, x_max), (y_min, y_max)) for the two plotted states
-#         state_indices: Which two state dimensions to plot
-#         state_names: Names for the axes
-#         rho: ROA threshold (if None, compute from boundary)
-#         grid_resolution: Number of grid points per dimension
-#         observer_nn: Optional observer for output feedback (x̂ = obs(y))
-#         trajectories: Optional list of trajectories to overlay
-#         title: Plot title
-#         save_html: Filename to save interactive HTML
-#         show: Whether to display the plot
-#         colorscale: Plotly colorscale name
-    
-#     Returns:
-#         Plotly figure object
-#     """
-#     device = next(lyapunov_nn.parameters()).device if hasattr(lyapunov_nn, 'parameters') else 'cpu'
-    
-#     # Create grid
-#     idx0, idx1 = state_indices
-#     x0_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
-#     x1_range = np.linspace(state_limits[1][0], state_limits[1][1], grid_resolution)
-#     X0, X1 = np.meshgrid(x0_range, x1_range)
-    
-#     # Initialize state grid
-#     nx = dynamics_system.nx
-#     states_grid = torch.zeros((grid_resolution * grid_resolution, nx), device=device)
-    
-#     # Fill in the two dimensions we're plotting
-#     states_grid[:, idx0] = torch.tensor(X0.flatten(), dtype=torch.float32, device=device)
-#     states_grid[:, idx1] = torch.tensor(X1.flatten(), dtype=torch.float32, device=device)
-    
-#     # Other dimensions set to equilibrium or zero
-#     x_eq = dynamics_system.x_equilibrium.to(device)
-#     for i in range(nx):
-#         if i not in state_indices:
-#             states_grid[:, i] = x_eq[i]
-    
-#     # Evaluate Lyapunov function
-#     with torch.no_grad():
-#         V_values = lyapunov_nn(states_grid).squeeze()
-#         V_grid = V_values.reshape(grid_resolution, grid_resolution).cpu().numpy()
-    
-#     # Compute Lyapunov derivative (V̇)
-#     with torch.no_grad():
-#         if observer_nn is not None:
-#             # Output feedback: y = h(x), x̂ = obs(y), u = π(x̂)
-#             y = dynamics_system.continuous_time_system.h(states_grid)
-#             x_hat = observer_nn(y)
-#             u = controller_nn(x_hat)
-#         else:
-#             # State feedback: u = π(x)
-#             u = controller_nn(states_grid)
-        
-#         # Compute x_next and Lyapunov derivative
-#         x_next = dynamics_system(states_grid, u)
-#         V_next = lyapunov_nn(x_next).squeeze()
-#         V_dot = V_next - V_values  # Discrete-time Lyapunov derivative
-#         V_dot_grid = V_dot.reshape(grid_resolution, grid_resolution).cpu().numpy()
-    
-#     # Determine ROA threshold
-#     if rho is None:
-#         # Compute rho from boundary values
-#         boundary_mask = (
-#             (states_grid[:, idx0] == state_limits[0][0]) |
-#             (states_grid[:, idx0] == state_limits[0][1]) |
-#             (states_grid[:, idx1] == state_limits[1][0]) |
-#             (states_grid[:, idx1] == state_limits[1][1])
-#         )
-#         if boundary_mask.any():
-#             rho = V_values[boundary_mask].min().item()
-#         else:
-#             rho = V_values.max().item() * 0.8
-    
-#     # Create subplots
-#     fig = make_subplots(
-#         rows=1, cols=2,
-#         subplot_titles=('Lyapunov Function V(x)', 'Lyapunov Derivative ΔV(x)'),
-#         specs=[[{'type': 'contour'}, {'type': 'contour'}]]
-#     )
-    
-#     # Plot 1: Lyapunov function
-#     fig.add_trace(
-#         go.Contour(
-#             x=x0_range,
-#             y=x1_range,
-#             z=V_grid,
-#             colorscale=colorscale,
-#             contours=dict(
-#                 start=0,
-#                 end=V_grid.max(),
-#                 size=V_grid.max() / 20,
-#             ),
-#             colorbar=dict(title="V(x)", x=0.45),
-#             hovertemplate='%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<br>V: %{z:.3f}<extra></extra>',
-#         ),
-#         row=1, col=1
-#     )
-    
-#     # Add ROA boundary (V(x) = rho)
-#     fig.add_trace(
-#         go.Contour(
-#             x=x0_range,
-#             y=x1_range,
-#             z=V_grid,
-#             contours=dict(
-#                 start=rho,
-#                 end=rho,
-#                 size=1,
-#                 coloring='none'
-#             ),
-#             line=dict(color='red', width=4),
-#             showscale=False,
-#             name=f'ROA (ρ={rho:.3f})',
-#             hovertemplate='ROA Boundary<extra></extra>',
-#         ),
-#         row=1, col=1
-#     )
-    
-#     # Plot 2: Lyapunov derivative
-#     fig.add_trace(
-#         go.Contour(
-#             x=x0_range,
-#             y=x1_range,
-#             z=V_dot_grid,
-#             colorscale='RdBu_r',  # Red for positive, blue for negative
-#             contours=dict(
-#                 start=V_dot_grid.min(),
-#                 end=V_dot_grid.max(),
-#                 size=(V_dot_grid.max() - V_dot_grid.min()) / 20,
-#             ),
-#             colorbar=dict(title="ΔV(x)", x=1.05),
-#             hovertemplate='%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<br>ΔV: %{z:.3f}<extra></extra>',
-#         ),
-#         row=1, col=2
-#     )
-    
-#     # Add zero contour for V_dot (should be negative everywhere in ROA)
-#     fig.add_trace(
-#         go.Contour(
-#             x=x0_range,
-#             y=x1_range,
-#             z=V_dot_grid,
-#             contours=dict(
-#                 start=0,
-#                 end=0,
-#                 size=1,
-#                 coloring='none'
-#             ),
-#             line=dict(color='black', width=3, dash='dash'),
-#             showscale=False,
-#             name='ΔV=0',
-#             hovertemplate='ΔV=0 Contour<extra></extra>',
-#         ),
-#         row=1, col=2
-#     )
-    
-#     # Add equilibrium point to both plots
-#     x_eq_np = x_eq.cpu().numpy()
-#     for col in [1, 2]:
-#         fig.add_trace(
-#             go.Scatter(
-#                 x=[x_eq_np[idx0]],
-#                 y=[x_eq_np[idx1]],
-#                 mode='markers',
-#                 marker=dict(size=12, color='lime', symbol='star', line=dict(width=2, color='black')),
-#                 name='Equilibrium',
-#                 showlegend=(col == 1),
-#                 hovertemplate='Equilibrium<extra></extra>',
-#             ),
-#             row=1, col=col
-#         )
-    
-#     # Overlay trajectories if provided
-#     if trajectories is not None:
-#         colors = ['white', 'yellow', 'cyan', 'magenta', 'orange']
-#         for i, traj in enumerate(trajectories):
-#             traj_np = traj.detach().cpu().numpy()
-#             color = colors[i % len(colors)]
-            
-#             for col in [1, 2]:
-#                 # Trajectory line
-#                 fig.add_trace(
-#                     go.Scatter(
-#                         x=traj_np[:, idx0],
-#                         y=traj_np[:, idx1],
-#                         mode='lines',
-#                         line=dict(color=color, width=2),
-#                         name=f'Trajectory {i+1}',
-#                         showlegend=(col == 1),
-#                         hovertemplate=f'Traj {i+1}<extra></extra>',
-#                     ),
-#                     row=1, col=col
-#                 )
-                
-#                 # Start point
-#                 fig.add_trace(
-#                     go.Scatter(
-#                         x=[traj_np[0, idx0]],
-#                         y=[traj_np[0, idx1]],
-#                         mode='markers',
-#                         marker=dict(size=10, color=color, symbol='circle'),
-#                         showlegend=False,
-#                         hovertemplate='Start<extra></extra>',
-#                     ),
-#                     row=1, col=col
-#                 )
-    
-#     # Update axes
-#     if state_names is None:
-#         state_names = (f'x{idx0}', f'x{idx1}')
-    
-#     fig.update_xaxes(title_text=state_names[0], row=1, col=1)
-#     fig.update_yaxes(title_text=state_names[1], row=1, col=1)
-#     fig.update_xaxes(title_text=state_names[0], row=1, col=2)
-#     fig.update_yaxes(title_text=state_names[1], row=1, col=2)
-    
-#     # Update layout
-#     if title is None:
-#         title = "Lyapunov Function and Region of Attraction"
-    
-#     fig.update_layout(
-#         title=title,
-#         height=650,
-#         width=1700,  # Wider to give more space
-#         hovermode='closest',
-#         showlegend=True,
-#         legend=dict(
-#             x=1.14,  # Moved further right
-#             y=0.5,
-#             xanchor='left',
-#             yanchor='middle',
-#             bgcolor='rgba(255,255,255,0.95)',
-#             bordercolor='black',
-#             borderwidth=1,
-#             font=dict(size=11)
-#         ),
-#         margin=dict(l=80, r=280, t=90, b=60)  # Larger right margin
-#     )
-    
-#     # Add more horizontal spacing between subplots
-#     fig.update_xaxes(domain=[0.0, 0.42], row=1, col=1)
-#     fig.update_xaxes(domain=[0.59, 0.99], row=1, col=2)
-    
-#     if save_html:
-#         fig.write_html(save_html)
-#         print(f"Lyapunov visualization saved to {save_html}")
-    
-#     if show:
-#         fig.show()
-    
-#     return fig
     
 def plot_lyapunov_3d_surface(
     lyapunov_nn,
@@ -621,15 +346,6 @@ def plot_lyapunov_3d_surface(
     Returns:
         Plotly figure
     """
-    # Convert state_limits to CPU numpy if they're tensors
-    def to_float(val):
-        """Convert tensor or array to float"""
-        if isinstance(val, torch.Tensor):
-            return val.detach().cpu().item()
-        elif isinstance(val, (np.ndarray, np.generic)):
-            return float(val)
-        else:
-            return float(val)
     
     state_limits = tuple(
         (to_float(lim[0]), to_float(lim[1])) for lim in state_limits
