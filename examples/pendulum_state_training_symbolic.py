@@ -18,6 +18,9 @@ import neural_lyapunov_training.models as models
 import neural_lyapunov_training.pendulum as pendulum
 import neural_lyapunov_training.train_utils as train_utils
 import neural_lyapunov_training.symbolic_dynamics as sd
+import neural_lyapunov_training.symbolic_systems as ss
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
 
 device = torch.device("cuda")
 dtype = torch.float
@@ -123,14 +126,11 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
-    pendulum_continuous = sd.SymbolicPendulum(m=1.0, l=1.0, beta=0.1, g=9.81)
+    pendulum_continuous = ss.SymbolicPendulumState(m=0.15, l=0.5, beta=0.1, g=9.81)
     dynamics = sd.GenericDiscreteTimeSystem(
         pendulum_continuous,
         dt=dt,
         integration_method=sd.IntegrationMethod[cfg.model.velocity_integration],
-        position_integration=sd.IntegrationMethod[
-            cfg.model.position_integration
-        ],
     )
 
     controller = controllers.NeuralNetworkController(
@@ -148,7 +148,9 @@ def main(cfg: DictConfig):
 
     absolute_output = True
     if cfg.model.lyapunov.quadratic:
-        _, S = compute_lqr(pendulum_continuous)
+        Q = np.eye(2)
+        R = np.eye(1) * 100
+        _, S = pendulum_continuous.lqr_control(Q, R)
         S_torch = torch.from_numpy(S).type(dtype).to(device)
         R = torch.linalg.cholesky(S_torch)
         lyapunov_nn = lyapunov.NeuralNetworkQuadraticLyapunov(
@@ -302,6 +304,13 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
     else:
         limit = cfg.model.limit_scale[-1] * torch.tensor(cfg.model.limit, device=device)
         lower_limit = -limit
@@ -377,7 +386,6 @@ def main(cfg: DictConfig):
     plt.plot(torch.stack(V_traj).cpu().detach().squeeze().numpy())
     plt.savefig(os.path.join(os.getcwd(), "Vtraj_roa.png"))
 
-    # pdb.set_trace()
     rho = derivative_lyaloss.get_rho().item()
     print("rho = ", rho)
     fig = plt.figure()
@@ -395,6 +403,48 @@ def main(cfg: DictConfig):
     fig.show()
     plt.savefig(os.path.join(os.getcwd(), "V_roa.png"))
 
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+
+    lrv.plot_lyapunov_2d(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_system=dynamics,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("theta", "theta_dot"),
+        rho=rho,
+        title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
+        save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
+        show=False,
+    )
+    lrv.plot_lyapunov_3d_surface(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_system=dynamics,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("theta", "theta_dot"),
+        rho=rho,
+        title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
+        save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
+        show=False,
+    )
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        rho=rho,
+        device=device,
+    )
     pass
 
 
