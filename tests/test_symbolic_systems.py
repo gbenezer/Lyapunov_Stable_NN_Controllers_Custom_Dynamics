@@ -16,6 +16,8 @@ from neural_lyapunov_training.symbolic_systems import (
     SymbolicPendulum,
     SymbolicPendulumState,
 )
+from neural_lyapunov_training.pendulum import PendulumDynamics
+import neural_lyapunov_training.dynamical_system as ds
 
 
 def test_sympy_to_torch_mapping():
@@ -81,10 +83,17 @@ if __name__ == "__main__":
     print("Testing SymbolicPendulumState")
     print("=" * 70)
     pendulum = SymbolicPendulumState(m=0.15, l=0.5, beta=0.1, g=9.81)
+    pendulum_continuous = PendulumDynamics(m=0.15, l=0.5, beta=0.1)
     pendulum.print_equations()
 
     discrete_pendulum = GenericDiscreteTimeSystem(
         pendulum, dt=0.01, integration_method=IntegrationMethod.RK4
+    )
+    discrete_pendulum_old_type = ds.SecondOrderDiscreteTimeSystem(
+        pendulum_continuous,
+        dt=0.01,
+        position_integration=ds.IntegrationMethod.ExplicitEuler,
+        velocity_integration=ds.IntegrationMethod.ExplicitEuler,
     )
 
     # Test 1: Basic forward pass
@@ -92,7 +101,9 @@ if __name__ == "__main__":
     x_test = torch.tensor([[0.1, 0.0]])
     u_test = torch.tensor([[0.0]])
     x_next = discrete_pendulum(x_test, u_test)  # Using __call__
+    x_next_old = discrete_pendulum_old_type.forward(x_test, u_test)
     print(f"x={x_test.squeeze().numpy()} -> x_next={x_next.squeeze().numpy()}")
+    print(f"x={x_test.squeeze().numpy()} -> x_next_old={x_next_old.squeeze().numpy()}")
 
     # Test 2: Batch processing
     print("\n--- Test 2: Batch Processing ---")
