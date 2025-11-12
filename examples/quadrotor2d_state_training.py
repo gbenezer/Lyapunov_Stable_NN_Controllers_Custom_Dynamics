@@ -18,6 +18,8 @@ import neural_lyapunov_training.models as models
 import neural_lyapunov_training.quadrotor2d as quadrotor2d
 import neural_lyapunov_training.train_utils as train_utils
 import neural_lyapunov_training.output_train_utils as output_train_utils
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
 
 device = torch.device("cuda")
 dtype = torch.float
@@ -408,6 +410,101 @@ def main(cfg: DictConfig):
             os.path.join(
                 os.getcwd(), f"V_{kappa}_{candidate_scale}_roa_{str(plot_idx)}.png"
             )
+        )
+
+    quadrotor_state_limits = tuple(
+        (lower_limit[i], upper_limit[i]) for i in range(len(lower_limit))
+    )
+
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=quadrotor_state_limits,
+        rho=rho,
+        device=device,
+    )
+
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+
+    labels = [r"$x$", r"$y$", r"$\theta$", r"$\dot x$", r"$\dot y$", r"$\dot \theta$"]
+
+    plot_indices = (
+        (2, 5),  # theta vs dot_theta
+        (0, 3),  # x vs dot_x
+        (1, 4),  # y vs dot_y
+        (0, 2),  # x vs theta
+        (1, 2),  # y vs theta
+        (0, 1),  # x vs y
+        (3, 4),  # dot_x vs dot_y
+        (4, 5),  # dot_y vs dot_theta
+        (3, 5),  # dot_x vs dot_theta
+    )
+
+    suffixes = (
+        "theta_v_dot_theta",
+        "x_v_dot_x",
+        "y_v_dot_y",
+        "x_v_theta",
+        "y_v_theta",
+        "x_v_y",
+        "dot_x_v_dot_y",
+        "dot_y_v_dot_theta", 
+        "dot_x_v_dot_theta",
+    )
+
+    titles = (
+        "Angle and Angle Derivative",
+        "X and X Derivative",
+        "Y and Y Derivative",
+        "X and Angle",
+        "Y and Angle",
+        "X and Y",
+        "X Derivative and Y Derivative",
+        "Y Derivative and Angle Derivative",
+        "X Derivative and Angle Derivative",
+    )
+
+    for idx_index, plot_idxes in enumerate(plot_indices):
+
+        name_tuple = (labels[plot_idxes[0]], labels[plot_idxes[1]])
+
+        state_lims = (
+            quadrotor_state_limits[plot_idxes[0]],
+            quadrotor_state_limits[plot_idxes[1]],
+        )
+
+        lrv.plot_lyapunov_2d(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"2D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+        )
+
+        lrv.plot_lyapunov_3d_surface(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            nx=6,
+            title=f"3D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+            show_derivative=True,
         )
 
 
