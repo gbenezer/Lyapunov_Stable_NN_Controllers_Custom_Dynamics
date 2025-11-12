@@ -1244,50 +1244,198 @@ class GenericDiscreteTimeSystem(nn.Module):
         return self.forward(x, u)
 
     def simulate(
-        self, x0: torch.Tensor, u_sequence: torch.Tensor, return_all: bool = True
-    ) -> Union[torch.Tensor, torch.Tensor]:
+        self,
+        x0: torch.Tensor,
+        controller: Optional[Union[torch.Tensor, Callable, torch.nn.Module]] = None,
+        horizon: Optional[int] = None,
+        return_controls: bool = False,
+        return_all: bool = True,
+        observer: Optional[Callable] = None,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        Simulate trajectory from initial state
-
+        Simulate trajectory from initial state.
+        
         Args:
             x0: Initial state (nx,) or (batch, nx)
-            u_sequence: Control sequence (T, nu) or (batch, T, nu)
+            controller: 
+                - torch.Tensor: Control sequence (T, nu) - horizon inferred from T
+                - Callable/nn.Module: Controller π(x) - horizon MUST be specified
+                - None: Zero control - horizon MUST be specified
+            horizon: Number of timesteps (required for controller functions)
+            return_controls: If True, return (trajectory, controls)
             return_all: If True, return all states; if False, only final state
-
+            observer: Optional observer x̂ = obs(x) for output feedback
+            
         Returns:
-            Trajectory: (T+1, nx) or (batch, T+1, nx) if return_all=True
-                       (nx,) or (batch, nx) if return_all=False
+            If return_controls=False:
+                Trajectory: (T+1, nx) or (batch, T+1, nx) if return_all=True
+                        (nx,) or (batch, nx) if return_all=False
+            If return_controls=True:
+                (Trajectory, Controls): Both same batch format
+        
+        Examples:
+            >>> # 1. Pre-computed control sequence
+            >>> u_seq = torch.zeros(100, 1)
+            >>> traj = system.simulate(x0, controller=u_seq)
+            
+            >>> # 2. Neural network controller
+            >>> controller_nn = NeuralNetworkController(...)
+            >>> traj = system.simulate(x0, controller=controller_nn, horizon=100)
+            
+            >>> # 3. Lambda function controller
+            >>> lqr_controller = lambda x: K @ (x - x_eq).T
+            >>> traj = system.simulate(x0, controller=lqr_controller, horizon=100)
+            
+            >>> # 4. Output feedback with observer
+            >>> traj = system.simulate(x0, controller=controller_nn, 
+            ...                        observer=observer_nn, horizon=100)
+            
+            >>> # 5. Return both trajectory and controls
+            >>> traj, controls = system.simulate(x0, controller=controller_nn,
+            ...                                  horizon=100, return_controls=True)
         """
+
+        # Determine type
+        is_control_sequence = isinstance(controller, torch.Tensor)
+        
+        if is_control_sequence:
+            # Can infer T from sequence
+            u_sequence = controller
+            if len(u_sequence.shape) == 2:
+                u_sequence = u_sequence.unsqueeze(0)
+            T = u_sequence.shape[1]
+            
+            if horizon is not None and horizon != T:
+                import warnings
+                warnings.warn(
+                    f"horizon={horizon} specified but control sequence has length {T}. "
+                    f"Using sequence length T={T}."
+                )
+                
+        else:
+            # Controller function or None - MUST have horizon
+            if horizon is None:
+                raise ValueError(
+                    "horizon must be specified when controller is a function or None.\n"
+                    "Usage:\n"
+                    "  - Control sequence: simulate(x0, controller=u_seq)  # horizon inferred\n"
+                    "  - Controller func:  simulate(x0, controller=π, horizon=100)\n"
+                    "  - Zero control:     simulate(x0, controller=None, horizon=100)"
+                )
+            T = horizon
+            
+            if controller is None:
+                controller_func = lambda x: torch.zeros(x.shape[0], self.nu, device=x.device)
+            else:
+                controller_func = controller
+
         # Handle dimensionality
         if len(x0.shape) == 1:
             x0 = x0.unsqueeze(0)
             squeeze_batch = True
         else:
             squeeze_batch = False
-
-        if len(u_sequence.shape) == 2:
-            u_sequence = u_sequence.unsqueeze(0)
-
-        batch_size, T, _ = u_sequence.shape
-
+        
+        batch_size = x0.shape[0]
+        
+        # Determine if controller is a sequence or a function
+        is_control_sequence = isinstance(controller, torch.Tensor)
+        is_controller_function = callable(controller) or isinstance(controller, torch.nn.Module)
+        
+        if controller is None:
+            # Zero control
+            if horizon is None:
+                raise ValueError("horizon must be specified when controller is None")
+            T = horizon
+            controller_func = lambda x: torch.zeros(x.shape[0], self.nu, device=x.device, dtype=x.dtype)
+            is_controller_function = True
+        elif is_control_sequence:
+            # Pre-computed control sequence
+            u_sequence = controller
+            
+            # Handle batch dimensions
+            if len(u_sequence.shape) == 2:
+                u_sequence = u_sequence.unsqueeze(0)
+            
+            # Expand to match batch size if needed
+            if u_sequence.shape[0] == 1 and batch_size > 1:
+                u_sequence = u_sequence.expand(batch_size, -1, -1)
+            
+            if u_sequence.shape[0] != batch_size:
+                raise ValueError(
+                    f"Control sequence batch size {u_sequence.shape[0]} "
+                    f"doesn't match state batch size {batch_size}"
+                )
+            
+            T = u_sequence.shape[1]
+            
+        elif is_controller_function:
+            # Controller is a function or neural network
+            if horizon is None:
+                raise ValueError("horizon must be specified when controller is a callable")
+            T = horizon
+            controller_func = controller
+        else:
+            raise TypeError(
+                f"controller must be torch.Tensor, callable, nn.Module, or None. "
+                f"Got {type(controller)}"
+            )
+        
+        # Initialize storage
         if return_all:
             trajectory = [x0]
-
+        if return_controls:
+            controls = []
+        
         x = x0
+        
+        # Simulation loop
         for t in range(T):
-            x = self.forward(x, u_sequence[:, t, :])
+            if is_control_sequence:
+                # Use pre-computed control
+                u = u_sequence[:, t, :]
+            else:
+                # Compute control from current state
+                if observer is not None:
+                    # Output feedback: u = π(x̂) where x̂ = obs(x)
+                    with torch.no_grad():
+                        x_hat = observer(x)
+                    u = controller_func(x_hat)
+                else:
+                    # State feedback: u = π(x)
+                    u = controller_func(x)
+                
+                # Ensure proper shape
+                if len(u.shape) == 1:
+                    u = u.unsqueeze(0)
+                elif len(u.shape) == 3:
+                    u = u.squeeze(1)
+            
+            # Store control if requested
+            if return_controls:
+                controls.append(u)
+            
+            # Step forward
+            x = self.forward(x, u)
+            
             if return_all:
                 trajectory.append(x)
-
+        
+        # Format outputs
         if return_all:
             result = torch.stack(trajectory, dim=1)  # (batch, T+1, nx)
             if squeeze_batch:
                 result = result.squeeze(0)
-            return result
         else:
+            result = x.squeeze(0) if squeeze_batch else x
+        
+        if return_controls:
+            controls_tensor = torch.stack(controls, dim=1)  # (batch, T, nu)
             if squeeze_batch:
-                x = x.squeeze(0)
-            return x
+                controls_tensor = controls_tensor.squeeze(0)
+            return result, controls_tensor
+        else:
+            return result
 
     def _integrate_first_order(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Integrate first-order system: dx/dt = f(x, u)"""
