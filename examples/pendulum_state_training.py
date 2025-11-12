@@ -148,7 +148,7 @@ def main(cfg: DictConfig):
         x_equilibrium=pendulum_continuous.x_equilibrium,
         u_equilibrium=pendulum_continuous.u_equilibrium,
     )
-    controller.eval()
+    # controller.eval()
 
     absolute_output = True
     if cfg.model.lyapunov.quadratic:

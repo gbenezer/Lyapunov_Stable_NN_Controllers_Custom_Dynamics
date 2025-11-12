@@ -141,7 +141,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    controller.eval()
+    # controller.eval()
 
     absolute_output = True
     R = torch.linalg.cholesky(S_torch)
