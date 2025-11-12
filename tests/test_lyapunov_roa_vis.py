@@ -46,6 +46,18 @@ def demo_lyapunov_visualization():
     discrete_pendulum = GenericDiscreteTimeSystem(
         pendulum, dt=0.01, integration_method=IntegrationMethod.RK4
     )
+    x0_batch = torch.tensor(
+        [
+            [0.5, 1],
+            [0.5, -1],
+            [-0.5, 1],
+            [-0.5, -1],
+            [0.1, 0.1],
+            [0.1, -0.1],
+            [-0.1, 0.1],
+            [-0.1, -0.1],
+        ]
+    )
 
     # Create neural networks
     lyap_nn = SimpleLyapunov()
@@ -54,6 +66,14 @@ def demo_lyapunov_visualization():
     # Set to eval mode
     lyap_nn.eval()
     controller_nn.eval()
+
+    traj_batch_vis_no_control = discrete_pendulum.simulate(
+        x0_batch, return_all=True, horizon=1000
+    )
+    traj_batch_vis_control = discrete_pendulum.simulate(
+        x0_batch, controller=controller_nn, horizon=1000, return_all=True
+    )
+    traj_batch_vis = torch.cat((traj_batch_vis_no_control, traj_batch_vis_control), 0)
 
     print("Generating Lyapunov visualizations...")
 
@@ -66,6 +86,7 @@ def demo_lyapunov_visualization():
         state_names=("theta (rad)", "omega (rad/s)"),
         rho=1.0,
         save_html="lyapunov_2d.html",
+        trajectories=traj_batch_vis,
         show=False,
     )
 
