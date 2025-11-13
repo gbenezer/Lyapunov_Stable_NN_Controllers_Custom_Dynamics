@@ -16,6 +16,8 @@ import neural_lyapunov_training.lyapunov as lyapunov
 import neural_lyapunov_training.models as models
 import neural_lyapunov_training.path_tracking as path_tracking
 import neural_lyapunov_training.train_utils as train_utils
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
 
 device = torch.device("cuda")
 dtype = torch.float
@@ -115,7 +117,7 @@ def main(cfg: DictConfig):
         x_equilibrium=path_tracking_continuous.x_equilibrium,
         u_equilibrium=path_tracking_continuous.u_equilibrium,
     )
-    controller.eval()
+    controller.train()
 
     absolute_output = True
     if cfg.model.lyapunov.quadratic:
@@ -140,7 +142,7 @@ def main(cfg: DictConfig):
             activation=nn.LeakyReLU,
             V_psd_form=cfg.model.V_psd_form,
         )
-    lyapunov_nn.eval()
+    lyapunov_nn.train()
 
     kappa = cfg.model.kappa
     derivative_lyaloss = lyapunov.LyapunovDerivativeLoss(
@@ -161,7 +163,7 @@ def main(cfg: DictConfig):
     logger = logging.getLogger(__name__)
     if cfg.approximate_lqr:
         approximate_lqr(
-            path_tracking_continuous, controller, lyapunov_nn, upper_limit, logger
+            path_tracking_continuous, controller, lyapunov_nn, limit, logger
         )
         torch.save(
             {"state_dict": derivative_lyaloss.state_dict()},
@@ -266,6 +268,13 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
     else:
         limit = cfg.model.limit_scale[-1] * torch.tensor(cfg.model.limit, device=device)
         lower_limit = -limit
@@ -290,6 +299,9 @@ def main(cfg: DictConfig):
         kappa=0.0,
         hard_max=True,
     )
+
+    lyapunov_nn.eval()
+    controller.eval()
     pgd_verifier_find_counterexamples = False
     counterexamples_check = torch.zeros((0, 2), device=device)
     for seed in range(100):
@@ -365,6 +377,49 @@ def main(cfg: DictConfig):
     )
     fig.show()
     plt.savefig(os.path.join(os.getcwd(), "V_roa.png"))
+
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        rho=rho,
+        device=device,
+    )
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+    lrv.plot_lyapunov_2d(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_system=dynamics,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("tracking_error", "heading_error"),
+        rho=rho,
+        title="Lyapunov Function for First-Order Path Tracking System",
+        save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
+        show=False,
+    )
+    lrv.plot_lyapunov_3d_surface(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_system=dynamics,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("tracking_error", "heading_error"),
+        rho=rho,
+        title="Lyapunov Function for First-Order Path Tracking System",
+        save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
+        show=False,
+        show_derivative=True,
+    )
 
 
 if __name__ == "__main__":
