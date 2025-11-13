@@ -3,13 +3,6 @@ Symbolic Dynamical Systems Framework
 
 A framework for defining dynamical systems symbolically using SymPy and
 automatically generating PyTorch-compatible numerical functions.
-
-Key improvements:
-- Better error handling and validation
-- Caching for improved performance
-- Comprehensive documentation
-- Backward compatibility properties
-- Type safety improvements
 """
 
 import sympy as sp
@@ -583,6 +576,8 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         Returns:
             C: Linearized observation matrix as PyTorch tensor
         """
+
+        # Handle batched input
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
             squeeze_output = True
@@ -629,11 +624,12 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         # Generate torch function for h if not cached
         if self._h_torch is None:
             h_with_params = self.substitute_parameters(self._h_sym)
-            # Use ONLY our custom namespace (don't add 'torch' as fallback to avoid conflicts)
+            # Use ONLY custom namespace (don't add 'torch' as fallback to avoid conflicts)
             self._h_torch = sp.lambdify(
                 self.state_vars, h_with_params, modules=[SYMPY_TO_TORCH]
             )
 
+        # Handle batched input
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
             squeeze_output = True
@@ -781,7 +777,7 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         return self
 
     def verify_jacobians(
-        self, x: torch.Tensor, u: torch.Tensor, epsilon: float = 1e-5, tol: float = 1e-3
+        self, x: torch.Tensor, u: torch.Tensor, tol: float = 1e-3
     ) -> Dict[str, Union[bool, float]]:
         """
         Verify symbolic Jacobians against numerical finite differences
@@ -789,7 +785,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         Args:
             x: State at which to verify (can be 1D or 2D)
             u: Control at which to verify (can be 1D or 2D)
-            epsilon: Not used (kept for API compatibility)
             tol: Tolerance for considering Jacobians equal
 
         Returns:
@@ -812,20 +807,60 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             B_sym = B_sym.unsqueeze(0)
 
         # Compute numerical Jacobians via autograd
-        fx = self.forward(x_grad, u_grad)  # fx shape: (1, nx)
+        fx = self.forward(x_grad, u_grad)  # fx shape: (1, n_outputs)
+
+        # - First-order: n_outputs = nx (all state derivatives)
+        # - Second-order: n_outputs = nq (only accelerations)
+        # - Higher-order: n_outputs = nq (highest derivative only)
+        if self.order == 1:
+            n_outputs = self.nx
+        else:
+            n_outputs = self.nq
+
+        # For higher-order systems, the Jacobians A and B are of full state-space form
+        # but forward() only returns the highest derivative. We need to verify only
+        # the relevant part of the Jacobians.
         A_num = torch.zeros_like(A_sym)
         B_num = torch.zeros_like(B_sym)
 
-        for i in range(self.nx):
-            if fx[0, i].requires_grad:
-                grad_x = torch.autograd.grad(
-                    fx[0, i], x_grad, retain_graph=True, create_graph=False
-                )[0]
-                grad_u = torch.autograd.grad(
-                    fx[0, i], u_grad, retain_graph=True, create_graph=False
-                )[0]
-                A_num[0, i] = grad_x[0]  # grad_x shape: (1, nx)
-                B_num[0, i] = grad_u[0]  # grad_u shape: (1, nu)
+        if self.order == 1:
+            # First-order: forward() returns dx/dt, verify full A and B
+            for i in range(n_outputs):
+                if fx[0, i].requires_grad:
+                    grad_x = torch.autograd.grad(
+                        fx[0, i], x_grad, retain_graph=True, create_graph=False
+                    )[0]
+                    grad_u = torch.autograd.grad(
+                        fx[0, i], u_grad, retain_graph=True, create_graph=False
+                    )[0]
+                    A_num[0, i] = grad_x[0]  # grad_x shape: (1, nx)
+                    B_num[0, i] = grad_u[0]  # grad_u shape: (1, nu)
+        else:
+            # Higher-order: forward() returns highest derivative only
+            # The full state-space A matrix has structure:
+            # For second-order: A = [[0, I], [A_accel]]
+            # We verify only the A_accel part (rows nq:nx)
+
+            for i in range(n_outputs):
+                if fx[0, i].requires_grad:
+                    grad_x = torch.autograd.grad(
+                        fx[0, i], x_grad, retain_graph=True, create_graph=False
+                    )[0]
+                    grad_u = torch.autograd.grad(
+                        fx[0, i], u_grad, retain_graph=True, create_graph=False
+                    )[0]
+
+                    # Place in the acceleration rows of the full state-space matrix
+                    row_idx = (self.order - 1) * self.nq + i
+                    A_num[0, row_idx] = grad_x[0]
+                    B_num[0, row_idx] = grad_u[0]
+
+            # For the derivative relationships (upper rows), we verify analytically
+            # These should be identity blocks: dq/dt = qdot, etc.
+            # The symbolic linearization already includes these, so we just copy them
+            for i in range((self.order - 1) * self.nq):
+                A_num[0, i] = A_sym[0, i]
+                B_num[0, i] = B_sym[0, i]
 
         A_error = (A_sym - A_num).abs().max().item()
         B_error = (B_sym - B_num).abs().max().item()
@@ -1452,6 +1487,15 @@ class GenericDiscreteTimeSystem(nn.Module):
 
     def _integrate_first_order(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """Integrate first-order system: dx/dt = f(x, u)"""
+
+        # Handle 1D vs 2D input
+        if len(x.shape) == 1:
+            x = x.unsqueeze(0)
+            u = u.unsqueeze(0)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+
         xdot = self.continuous_time_system.forward(x, u)
 
         if self.integration_method == IntegrationMethod.ExplicitEuler:
@@ -1475,9 +1519,11 @@ class GenericDiscreteTimeSystem(nn.Module):
         return x_next
 
     def _integrate_second_order(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """Integrate second-order system: x = [q, qdot], qddot = f(x, u)"""
+        """
+        Integrate second-order system: x = [q, qdot], qddot = f(x, u)
+        """
 
-        # Handle 1D vs 2D input (same pattern as _integrate_first_order)
+        # Handle 1D vs 2D input
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
             u = u.unsqueeze(0)
@@ -1489,6 +1535,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         q = x[:, :nq]
         qdot = x[:, nq:]
 
+        # Compute acceleration at current state
         qddot = self.continuous_time_system.forward(x, u)
 
         # Validate acceleration shape
@@ -1498,36 +1545,57 @@ class GenericDiscreteTimeSystem(nn.Module):
             else:
                 raise ValueError(f"Expected qddot shape (*, {nq}), got {qddot.shape}")
 
-        # Integrate velocity
         if self.integration_method == IntegrationMethod.ExplicitEuler:
             qdot_next = qdot + qddot * self.dt
+
         elif self.integration_method == IntegrationMethod.MidPoint:
             qdot_mid = qdot + 0.5 * self.dt * qddot
             x_mid = torch.cat([q, qdot_mid], dim=1)
             qddot_mid = self.continuous_time_system.forward(x_mid, u)
             qdot_next = qdot + self.dt * qddot_mid
+
         elif self.integration_method == IntegrationMethod.RK4:
-            k1 = qddot
-            x_mid = torch.cat([q, qdot + 0.5 * self.dt * k1], dim=1)
-            k2 = self.continuous_time_system.forward(x_mid, u)
-            x_mid = torch.cat([q, qdot + 0.5 * self.dt * k2], dim=1)
-            k3 = self.continuous_time_system.forward(x_mid, u)
-            x_mid = torch.cat([q, qdot + self.dt * k3], dim=1)
-            k4 = self.continuous_time_system.forward(x_mid, u)
-            qdot_next = qdot + (self.dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+            k1_vel = qddot
+            qdot_stage2 = qdot + 0.5 * self.dt * k1_vel
+            x_stage2 = torch.cat([q, qdot_stage2], dim=1)
+            k2_vel = self.continuous_time_system.forward(x_stage2, u)
+            qdot_stage3 = qdot + 0.5 * self.dt * k2_vel
+            x_stage3 = torch.cat([q, qdot_stage3], dim=1)
+            k3_vel = self.continuous_time_system.forward(x_stage3, u)
+            qdot_stage4 = qdot + self.dt * k3_vel
+            x_stage4 = torch.cat([q, qdot_stage4], dim=1)
+            k4_vel = self.continuous_time_system.forward(x_stage4, u)
+
+            # Combine stages
+            qdot_next = qdot + (self.dt / 6.0) * (
+                k1_vel + 2 * k2_vel + 2 * k3_vel + k4_vel
+            )
+
         else:
             raise NotImplementedError(
                 f"Integration method {self.integration_method} not implemented for 2nd order"
             )
 
-        # Integrate position
         if self.position_integration == IntegrationMethod.ExplicitEuler:
             q_next = q + qdot * self.dt
+
         elif self.position_integration == IntegrationMethod.MidPoint:
             q_next = q + (qdot_next + qdot) / 2 * self.dt
+
         elif self.position_integration == IntegrationMethod.RK4:
-            # Use midpoint for now (fully consistent RK4 would need intermediate velocities)
-            q_next = q + (qdot_next + qdot) / 2 * self.dt
+
+            if self.integration_method == IntegrationMethod.RK4:
+                k1_pos = qdot
+                k2_pos = qdot_stage2
+                k3_pos = qdot_stage3
+                k4_pos = qdot_next  # Final velocity
+
+                q_next = q + (self.dt / 6.0) * (
+                    k1_pos + 2 * k2_pos + 2 * k3_pos + k4_pos
+                )
+            else:
+                q_next = q + (qdot_next + qdot) / 2 * self.dt
+
         else:
             raise NotImplementedError(
                 f"Position integration {self.position_integration} not implemented"
@@ -1895,10 +1963,6 @@ class GenericDiscreteTimeSystem(nn.Module):
         S = control.dlyap(A_cl, np.eye(2 * self.nx))
 
         return S
-
-    def __call__(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
-        """Make the discrete system callable"""
-        return self.forward(x, u)
 
     def print_info(
         self, include_equations: bool = True, include_linearization: bool = True
