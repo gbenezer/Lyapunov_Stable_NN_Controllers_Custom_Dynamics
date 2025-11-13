@@ -114,9 +114,7 @@ def main(cfg: DictConfig):
 
     Q = np.diag(np.array([1, 1, 1, 10, 10, 10.0]))
     R = np.diag(np.array([10, 10.0]))
-    K, S = quadrotor_continuous.lqr_control(
-        Q, R, quadrotor_continuous.x_equilibrium, quadrotor_continuous.u_equilibrium
-    )
+    K, S = quadrotor_continuous.lqr_control(Q, R)
     K_torch = torch.from_numpy(K).type(dtype).to(device)
     S_torch = torch.from_numpy(S).type(dtype).to(device)
 
