@@ -1,9 +1,9 @@
-run_dir: ./output/benezerg/path_tracking/${now:%Y-%m-%d}/${now:%H-%M-%S}_${user.wandb_suffix}
+run_dir: ./output/benezerg/pendulum_state/${now:%Y-%m-%d}/${now:%H-%M-%S}_${user.wandb_suffix}
 
 wandb_enabled: True
 wandb_entity: GB-Northeastern-Projects
 wandb_project: CS-7268-Group-Project
-wandb_suffix: V100_PCIe_set_1
+wandb_suffix: v100-sxm2_train_controller_symbolic
 
 load_lyaloss: null
 Vmin_x_pgd_path: null 
