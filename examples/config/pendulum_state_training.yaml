@@ -32,6 +32,7 @@ model:
   controller_nlayer: 4
   controller_hidden_dim: 8
   controller_path: examples/data/pendulum/state_feedback/controller_init.pth
+  # controller_path: models/pendulum_state_feedback.pth
   u_max: 6
 
 train:
