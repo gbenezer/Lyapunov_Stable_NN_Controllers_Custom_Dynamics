@@ -126,11 +126,12 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
-    pendulum_continuous = ss.SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+    pendulum_continuous = ss.SymbolicPendulum2ndOrder(m=0.15, l=0.5, beta=0.1, g=9.81)
     dynamics = sd.GenericDiscreteTimeSystem(
         pendulum_continuous,
         dt=dt,
-        integration_method=sd.IntegrationMethod[cfg.model.position_integration],
+        integration_method=sd.IntegrationMethod[cfg.model.velocity_integration],
+        position_integration=sd.IntegrationMethod[cfg.model.position_integration],
     )
 
     controller = controllers.NeuralNetworkController(
@@ -144,7 +145,7 @@ def main(cfg: DictConfig):
         x_equilibrium=pendulum_continuous.x_equilibrium,
         u_equilibrium=pendulum_continuous.u_equilibrium,
     )
-    controller.eval()
+    controller.train()
 
     absolute_output = True
     if cfg.model.lyapunov.quadratic:
@@ -178,7 +179,7 @@ def main(cfg: DictConfig):
             activation=nn.LeakyReLU,
             V_psd_form=cfg.model.V_psd_form,
         )
-    lyapunov_nn.eval()
+    lyapunov_nn.train()
 
     kappa = cfg.model.kappa
     rho_multiplier = cfg.model.rho_multiplier
@@ -325,6 +326,8 @@ def main(cfg: DictConfig):
             direction="minimize",
         )
 
+    lyapunov_nn.eval()
+    controller.eval()
     # Check with pgd attack.
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
@@ -427,7 +430,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("theta", "theta_dot"),
         rho=rho,
-        title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
+        title="Lyapunov Function for Symbolic Second-Order Inverted Pendulum System",
         save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
         show=False,
     )
@@ -441,7 +444,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("theta", "theta_dot"),
         rho=rho,
-        title="Lyapunov Function for Symbolic First-Order Inverted Pendulum System",
+        title="Lyapunov Function for Symbolic Second-Order Inverted Pendulum System",
         save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
         show=False,
         show_derivative=True,
