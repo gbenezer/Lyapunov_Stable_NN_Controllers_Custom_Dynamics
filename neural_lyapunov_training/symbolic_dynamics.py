@@ -8,6 +8,7 @@ automatically generating PyTorch-compatible numerical functions.
 import copy
 import time
 import sympy as sp
+from sympy import pycode
 import numpy as np
 import scipy
 import torch
