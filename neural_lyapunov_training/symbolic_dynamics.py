@@ -297,7 +297,7 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         elif self.order == 2:
             # Second-order system: x = [q, qdot], qddot = f(x, u)
             # Need to construct full state-space form:
-            # d/dt [q]    = [      0       I  ] [q]    + [  0  ] u
+            # d/dt [q]    = [      0       I ]  [q]    + [  0  ] u
             #      [qdot]   [df/dq   df/dqdot]  [qdot]   [df/du]
 
             nq = self.nq
@@ -449,7 +449,11 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
 
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
-        Evaluate dynamics: dx/dt = f(x, u)
+        Evaluate continuous-time dynamics: compute state derivative dx/dt = f(x, u)
+    
+        **CRITICAL DISTINCTION**: This method returns the DERIVATIVE (rate of change)
+        of the state, NOT the next state value. This is fundamentally different from
+        discrete-time systems.
 
         Args:
             x: State tensor (batch_size, nx) or (nx,)
@@ -1450,11 +1454,12 @@ class GenericDiscreteTimeSystem(nn.Module):
 
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
-        Compute next state: x_next = discrete_dynamics(x, u)
 
-        Handles both 1D and 2D inputs:
-        - 1D input: (nx,) and (nu,) -> returns (nx,)
-        - 2D input: (batch, nx) and (batch, nu) -> returns (batch, nx)
+        Compute next state: x[k+1] = discrete_dynamics(x, u[k])
+    
+        **CRITICAL DISTINCTION**: This method returns the NEXT STATE x[k+1], NOT
+        the derivative dx/dt. This is fundamentally different from continuous-time
+        systems and is what you typically want for simulation and discrete control.
 
         Args:
             x: Current state
@@ -2746,20 +2751,98 @@ class GenericDiscreteTimeSystem(nn.Module):
 
 class ExtendedKalmanFilter:
     """
-    Extended Kalman Filter for nonlinear systems
+    Extended Kalman Filter (EKF) for nonlinear state estimation.
 
-    Works with both SymbolicDynamicalSystem (continuous) and
-    GenericDiscreteTimeSystem (discrete)
+    The EKF estimates the state of a nonlinear system by:
+    1. Propagating state through NONLINEAR dynamics
+    2. Re-linearizing at the current estimate each time step
+    3. Using the linearization to propagate uncertainty
+    4. Updating based on measurements
+
+    Theory:
+    ------
+    **Predict Step**:
+        x̂[k|k-1] = f(x̂[k-1|k-1], u[k-1])               [Nonlinear dynamics]
+        A[k] = ∂f/∂x |_{x̂[k-1|k-1], u[k-1]}            [Linearization at current estimate]
+        P[k|k-1] = A[k] P[k-1|k-1] A[k]^T + Q          [Covariance propagation]
+
+    **Update Step**:
+        ŷ[k|k-1] = h(x̂[k|k-1])                         [Nonlinear observation]
+        C[k] = ∂h/∂x |_{x̂[k|k-1]}                      [Observation Jacobian]
+        S[k] = C[k] P[k|k-1] C[k]^T + R                [Innovation covariance]
+        K[k] = P[k|k-1] C[k]^T S[k]^{-1}               [Kalman gain - varies with time!]
+        x̂[k|k] = x̂[k|k-1] + K[k](y[k] - ŷ[k|k-1])      [State update]
+        P[k|k] = (I - K[k]C[k]) P[k|k-1]               [Covariance update]
+
+    Attributes:
+        system: SymbolicDynamicalSystem or GenericDiscreteTimeSystem
+        Q: Process noise covariance (nx, nx)
+        R: Measurement noise covariance (ny, ny)
+        x_hat: Current state estimate (nx,)
+        P: Current covariance estimate (nx, nx)
+        is_discrete: Whether system is discrete or continuous
+
+    Example:
+        >>> # Create EKF for pendulum
+        >>> pendulum = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+        >>> Q_process = np.diag([0.001, 0.01])
+        >>> R_measurement = np.array([[0.1]])
+        >>>
+        >>> ekf = ExtendedKalmanFilter(pendulum, Q_process, R_measurement)
+        >>>
+        >>> # Initialize at origin
+        >>> ekf.reset(x0=torch.tensor([0.1, 0.0]))
+        >>>
+        >>> # Estimation loop
+        >>> for t in range(num_steps):
+        >>>     # Predict
+        >>>     ekf.predict(u[t], dt=0.01)
+        >>>
+        >>>     # Get noisy measurement
+        >>>     y_measured = measure_angle(x_true[t]) + np.random.randn() * 0.1
+        >>>
+        >>>     # Update
+        >>>     ekf.update(torch.tensor([y_measured]))
+        >>>
+        >>>     # Get estimate
+        >>>     x_estimate = ekf.x_hat
+        >>>     uncertainty = ekf.P
+        >>>
+        >>> # EKF can track large swings
+        >>> # Unlike constant-gain observer which is only valid near equilibrium
+
+    Notes:
+        - Process noise Q represents model uncertainty and disturbances
+        - Measurement noise R represents sensor characteristics
+        - Larger Q → trust measurements more (higher gain)
+        - Larger R → trust model more (lower gain)
+        - Covariance P tracks estimate uncertainty
+        - Can be used with nonlinear controllers (MPC, feedback linearization)
+
+    See Also:
+        kalman_gain: Constant-gain observer for linear systems
+        LinearObserver: Linear observer with constant gain
+        discrete_kalman_gain: Discrete-time constant-gain design
     """
 
     def __init__(self, system, Q_process: np.ndarray, R_measurement: np.ndarray):
         """
-        Initialize EKF
+        Initialize Extended Kalman Filter.
 
         Args:
             system: SymbolicDynamicalSystem or GenericDiscreteTimeSystem
-            Q_process: Process noise covariance (nx, nx)
-            R_measurement: Measurement noise covariance (ny, ny)
+                   Must have forward(), h(), linearized_dynamics(), and
+                   linearized_observation() methods
+            Q_process: Process noise covariance (nx, nx). Represents model
+                      uncertainty and unmodeled disturbances.
+            R_measurement: Measurement noise covariance (ny, ny). Represents
+                          sensor noise characteristics.
+
+        Example:
+            >>> system = SymbolicQuadrotor2D()
+            >>> Q = np.eye(6) * 0.01  # Low process noise
+            >>> R = np.eye(3) * 0.1   # Moderate measurement noise
+            >>> ekf = ExtendedKalmanFilter(system, Q, R)
         """
         self.system = system
         self.Q = Q_process
@@ -2773,11 +2856,22 @@ class ExtendedKalmanFilter:
 
     def predict(self, u: torch.Tensor, dt: Optional[float] = None):
         """
-        Prediction step
+        EKF prediction step: propagate state estimate and covariance.
 
         Args:
-            u: Control input
-            dt: Time step (required for continuous systems)
+            u: Control input (nu,)
+            dt: Time step (required for continuous-time systems, ignored for discrete)
+
+        Example:
+            >>> ekf.predict(u=torch.tensor([1.0]), dt=0.01)
+            >>> print(f"Predicted state: {ekf.x_hat}")
+            >>> print(f"Predicted covariance: {ekf.P}")
+
+        Notes:
+            - Must call predict() before update() in each cycle
+            - For discrete systems, dt is ignored
+            - For continuous systems, uses Euler integration
+            - Covariance grows during prediction (adds Q)
         """
         if self.is_discrete:
             # Discrete system: x̂[k+1|k] = f(x̂[k|k], u[k])
@@ -2809,10 +2903,25 @@ class ExtendedKalmanFilter:
 
     def update(self, y_measurement: torch.Tensor):
         """
-        Update step (correction)
+        EKF update step: correct estimate using measurement.
 
         Args:
-            y_measurement: Actual measurement
+            y_measurement: Measurement vector (ny,). Should match the
+                          output dimension of h(x).
+
+        Example:
+            >>> # After prediction
+            >>> y_measured = torch.tensor([0.15, 2.1, 0.05])  # Noisy measurement
+            >>> ekf.update(y_measured)
+            >>> print(f"Updated state: {ekf.x_hat}")
+            >>> print(f"Updated covariance: {ekf.P}")
+            >>> print(f"Uncertainty reduced: {np.trace(ekf.P)}")
+
+        Notes:
+            - Covariance shrinks during update (information gained)
+            - Large innovation → either bad estimate or bad measurement
+            - Gain K[k] adapts based on current uncertainty P
+            - Must call predict() before update()
         """
         # Ensure y_measurement is 1D
         if len(y_measurement.shape) == 0:
@@ -2877,7 +2986,32 @@ class ExtendedKalmanFilter:
     def reset(
         self, x0: Optional[torch.Tensor] = None, P0: Optional[torch.Tensor] = None
     ):
-        """Reset filter state"""
+        """
+        Reset filter to initial state and covariance.
+
+        Useful for:
+        - Starting a new estimation sequence
+        - Recovering from filter divergence
+        - Testing different initial conditions
+
+        Args:
+            x0: Initial state estimate (nx,). Uses equilibrium if None.
+            P0: Initial covariance (nx, nx). Uses 0.1*I if None.
+
+        Example:
+            >>> # Reset to known initial condition
+            >>> ekf.reset(x0=torch.tensor([0.1, 0.0]),
+            ...           P0=torch.eye(2) * 0.01)  # Low initial uncertainty
+            >>>
+            >>> # Reset to equilibrium with high uncertainty
+            >>> ekf.reset()  # Uses default x_equilibrium and 0.1*I
+
+        Notes:
+            - Called automatically in __init__()
+            - P0 represents initial uncertainty about x0
+            - Larger P0 → less confident in initial estimate
+            - After reset, start with predict() then update()
+        """
         if x0 is not None:
             self.x_hat = x0.clone()
         else:
@@ -2899,22 +3033,139 @@ class ExtendedKalmanFilter:
 
 class LinearController:
     """
-    Linear state feedback controller: u = K @ (x - x_eq) + u_eq
+    Linear state feedback controller with equilibrium offset.
+
+    Implements the control law:
+        u(x) = K @ (x - x_eq) + u_eq
+
+    where:
+    - K is the control gain matrix
+    - x_eq is the equilibrium/reference state
+    - u_eq is the equilibrium/feedforward control
+
+    Valid Region:
+    ------------
+    - **Linear systems**: Globally valid
+    - **Nonlinear systems**: Valid near equilibrium where linearization holds
+    - Performance degrades as ||x - x_eq|| increases
+
+    Attributes:
+        K: Control gain matrix (nu, nx)
+        x_eq: Equilibrium/reference state (nx,)
+        u_eq: Equilibrium/feedforward control (nu,)
+
+    Example - LQR Control:
+        >>> # Design LQR controller
+        >>> system = SymbolicPendulum(m=1.0, l=0.5)
+        >>> Q = np.diag([10.0, 1.0])
+        >>> R = np.array([[0.1]])
+        >>> K, S = system.lqr_control(Q, R)
+        >>>
+        >>> # Create controller
+        >>> controller = LinearController(K, system.x_equilibrium, system.u_equilibrium)
+        >>>
+        >>> # Use in simulation
+        >>> x = torch.tensor([0.1, 0.0])  # Small deviation from equilibrium
+        >>> u = controller(x)
+        >>> print(f"Control: {u}")
+
+    Example - Tracking Reference:
+        >>> # Track different equilibrium
+        >>> x_ref = torch.tensor([0.5, 0.0])  # Desired position
+        >>> u_ref = compute_feedforward(x_ref)
+        >>>
+        >>> # Controller drives x → x_ref
+        >>> tracking_controller = LinearController(K, x_ref, u_ref)
+        >>>
+        >>> # In control loop
+        >>> for t in range(steps):
+        >>>     u = tracking_controller(x[t])
+        >>>     x[t+1] = system(x[t], u)
+
+    Example - Output Feedback (with Observer):
+        >>> # Design LQG
+        >>> K, L = system.lqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+        >>>
+        >>> # Controller uses state estimate, not true state
+        >>> controller = LinearController(K, system.x_equilibrium, system.u_equilibrium)
+        >>> observer = LinearObserver(system, L)
+        >>>
+        >>> for t in range(steps):
+        >>>     y = measure(x_true[t])
+        >>>     observer.update(u, y, dt)
+        >>>     u = controller(observer.x_hat)  # Use estimate!
+        >>>     x_true[t+1] = system(x_true[t], u)
+
+    Example - Gain Scheduling:
+        >>> # Different gains for different regions
+        >>> K_upright = system.lqr_control(Q1, R)[0]  # Near upright
+        >>> K_hanging = system.lqr_control(Q2, R)[0]  # Near hanging
+        >>>
+        >>> controller_upright = LinearController(K_upright, x_eq_up, u_eq_up)
+        >>> controller_hanging = LinearController(K_hanging, x_eq_down, u_eq_down)
+        >>>
+        >>> # Switch based on state
+        >>> def adaptive_control(x):
+        >>>     if abs(x[0]) < np.pi/4:  # Near upright
+        >>>         return controller_upright(x)
+        >>>     else:
+        >>>         return controller_hanging(x)
+
+    Notes:
+        - The feedforward term u_eq ensures u=u_eq at x=x_eq
+        - For tracking time-varying references, update x_eq and u_eq online
+        - Can be used with state estimation (observer-based control)
+        - Handles both 1D and batched inputs automatically
+
+    See Also:
+        lqr_control: Design optimal K matrix
+        LinearObserver: State estimation for output feedback
+        lqg_control: Combined controller and observer design
     """
 
     def __init__(self, K: np.ndarray, x_eq: torch.Tensor, u_eq: torch.Tensor):
         """
+        Initialize linear state feedback controller.
+
         Args:
-            K: Control gain matrix
-            x_eq: Equilibrium state
-            u_eq: Equilibrium control
+            K: Control gain matrix (nu, nx).
+            x_eq: Equilibrium/reference state (nx,)
+            u_eq: Equilibrium/feedforward control (nu,)
+
+        Example:
+            >>> K = np.array([[-12.5, -5.0]])  # SISO system
+            >>> x_eq = torch.zeros(2)
+            >>> u_eq = torch.zeros(1)
+            >>> controller = LinearController(K, x_eq, u_eq)
         """
         self.K = torch.tensor(K, dtype=torch.float32)
         self.x_eq = x_eq
         self.u_eq = u_eq
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute control input"""
+        """
+        Compute control input: u = K @ (x - x_eq) + u_eq
+
+        Args:
+            x: Current state (nx,) or (batch, nx)
+
+        Returns:
+            u: Control input (nu,) or (batch, nu)
+
+        Example:
+            >>> x = torch.tensor([0.1, 0.05])
+            >>> u = controller(x)
+            >>> print(f"Control: {u}")
+            >>>
+            >>> # Batched computation
+            >>> x_batch = torch.randn(100, 2)  # 100 states
+            >>> u_batch = controller(x_batch)  # 100 controls
+
+        Notes:
+            - Automatically handles 1D or 2D inputs
+            - Returns same batch structure as input
+            - All operations differentiable (can be used in learning)
+        """
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
             squeeze = True
@@ -2929,7 +3180,15 @@ class LinearController:
         return u
 
     def to(self, device):
-        """Move to device"""
+        """
+        Move controller to specified device (CPU/GPU).
+
+        Args:
+            device: torch.device or string ('cpu', 'cuda')
+
+        Returns:
+            Self for chaining
+        """
         self.K = self.K.to(device)
         self.x_eq = self.x_eq.to(device)
         self.u_eq = self.u_eq.to(device)
@@ -2938,14 +3197,108 @@ class LinearController:
 
 class LinearObserver:
     """
-    Linear observer: dx̂/dt = A x̂ + B u + L(y - C x̂)
+    Linear state observer with constant gain.
+
+    Implements the observer:
+        d x̂/dt = f(x̂, u) + L(y - h(x̂))                         [Continuous-time]
+        x̂[k+1] = f(x̂[k], u[k]) + L(y[k+1] - h(f(x̂[k], u[k])))  [Discrete-time]
+
+    where:
+    - x̂ is the state estimate
+    - L is the observer gain matrix
+    - y is the measurement
+    - h(x̂) is the predicted measurement
+
+    Attributes:
+        system: SymbolicDynamicalSystem or GenericDiscreteTimeSystem
+        L: Observer gain matrix (nx, ny)
+        x_hat: Current state estimate (nx,)
+
+    Example - Continuous-Time Observer:
+        >>> # Design Kalman gain
+        >>> system = SymbolicPendulum(m=1.0, l=0.5)
+        >>> Q_process = np.diag([0.001, 0.01])
+        >>> R_measurement = np.array([[0.1]])
+        >>> L = system.kalman_gain(Q_process, R_measurement)
+        >>>
+        >>> # Create observer
+        >>> observer = LinearObserver(system, L)
+        >>> observer.reset(x0=torch.zeros(2))
+        >>>
+        >>> # Observer loop
+        >>> dt = 0.01
+        >>> for t in range(num_steps):
+        >>>     observer.update(u[t], y_measured[t], dt)
+        >>>     x_estimate = observer.x_hat
+
+    Example - Discrete-Time Observer:
+        >>> # Create discrete system
+        >>> system_ct = SymbolicQuadrotor2D()
+        >>> system_dt = GenericDiscreteTimeSystem(system_ct, dt=0.01)
+        >>>
+        >>> # Design discrete Kalman gain
+        >>> L = system_dt.discrete_kalman_gain(Q_process, R_measurement)
+        >>>
+        >>> # Create observer
+        >>> observer = LinearObserver(system_dt, L)
+        >>>
+        >>> # Observer loop (no dt needed for discrete)
+        >>> for k in range(num_steps):
+        >>>     observer.update(u[k], y[k], dt=None)  # dt ignored for discrete
+        >>>     x_estimate = observer.x_hat
+
+    Example - Output Feedback Control:
+        >>> # Design LQG controller
+        >>> K, L = system.lqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+        >>>
+        >>> # Create controller and observer
+        >>> controller = LinearController(K, system.x_equilibrium, system.u_equilibrium)
+        >>> observer = LinearObserver(system, L)
+        >>>
+        >>> # Closed-loop with output feedback
+        >>> x_true = x0
+        >>> observer.reset(x0=system.x_equilibrium)  # Start from equilibrium guess
+        >>>
+        >>> for t in range(num_steps):
+        >>>     # Measure (with noise)
+        >>>     y = system.h(x_true) + torch.randn(system.ny) * 0.1
+        >>>
+        >>>     # Update observer
+        >>>     observer.update(u, y, dt)
+        >>>
+        >>>     # Compute control based on estimate
+        >>>     u = controller(observer.x_hat)
+        >>>
+        >>>     # Update true system
+        >>>     x_true = system(x_true, u) if discrete else integrate(x_true, u, dt)
+
+    Notes:
+        - Gain L is constant and designed at equilibrium
+        - For nonlinear systems, only accurate near equilibrium
+        - No covariance tracking
+        - Can be used with both continuous and discrete systems
+        - Lower computational cost than EKF
+
+    See Also:
+        kalman_gain: Design L for continuous systems
+        discrete_kalman_gain: Design L for discrete systems
+        ExtendedKalmanFilter: Adaptive nonlinear observer
+        LinearController: State feedback controller
+        lqg_control: Combined controller and observer design
     """
 
     def __init__(self, system, L: np.ndarray):
         """
+        Initialize linear observer with constant gain.
+
         Args:
-            system: Dynamical system
-            L: Observer gain matrix
+            system: SymbolicDynamicalSystem or GenericDiscreteTimeSystem
+            L: Observer gain matrix (nx, ny). Typically from kalman_gain()
+               or discrete_kalman_gain().
+
+        Example:
+            >>> L = system.kalman_gain(Q_process, R_measurement)
+            >>> observer = LinearObserver(system, L)
         """
         self.system = system
         self.L = torch.tensor(L, dtype=torch.float32)
@@ -2953,12 +3306,33 @@ class LinearObserver:
 
     def update(self, u: torch.Tensor, y: torch.Tensor, dt: float):
         """
-        Update observer state
+        Update observer state estimate.
+
+        Continuous-time:
+            d x̂/dt = f(x̂, u) + L(y - h(x̂))
+            x̂_new ≈ x̂_old + dt * [f(x̂, u) + L(y - h(x̂))]
+
+        Discrete-time:
+            x̂_pred = f(x̂, u)
+            x̂_new = x̂_pred + L(y - h(x̂_pred))
 
         Args:
-            u: Control input
-            y: Measurement
-            dt: Time step (for continuous systems)
+            u: Control input (nu,)
+            y: Measurement (ny,)
+            dt: Time step (used for continuous systems, ignored for discrete)
+
+        Example:
+            >>> u = torch.tensor([1.0])
+            >>> y_measured = torch.tensor([0.15])  # Noisy angle measurement
+            >>> observer.update(u, y_measured, dt=0.01)
+            >>> print(f"Estimate: {observer.x_hat}")
+
+        Notes:
+            - For continuous systems: uses Euler integration
+            - For discrete systems: dt parameter is ignored
+            - Innovation = y - h(x̂_pred) is the measurement residual
+            - Large innovation suggests either bad estimate or bad measurement
+            - Gain L determines how much to trust innovation vs model
         """
         # Predict
         with torch.no_grad():
@@ -2981,14 +3355,39 @@ class LinearObserver:
             self.x_hat = x_pred + (self.L @ innovation.unsqueeze(-1)).squeeze(-1)
 
     def reset(self, x0: Optional[torch.Tensor] = None):
-        """Reset observer state"""
+        """
+        Reset observer to initial state estimate.
+
+        Args:
+            x0: Initial state estimate (nx,). Uses equilibrium if None.
+
+        Example:
+            >>> # Reset to known initial condition
+            >>> observer.reset(x0=torch.tensor([0.1, 0.0]))
+            >>>
+            >>> # Reset to equilibrium
+            >>> observer.reset()  # Uses system.x_equilibrium
+
+        Notes:
+            - Called automatically in __init__()
+            - Unlike EKF, no covariance to reset
+            - Start observer from best available estimate
+        """
         if x0 is not None:
             self.x_hat = x0.clone()
         else:
             self.x_hat = self.system.x_equilibrium.clone()
 
     def to(self, device):
-        """Move to device"""
+        """
+        Move observer to specified device (CPU/GPU).
+
+        Args:
+            device: torch.device or string ('cpu', 'cuda')
+
+        Returns:
+            Self for chaining
+        """
         self.L = self.L.to(device)
         self.x_hat = self.x_hat.to(device)
         return self
