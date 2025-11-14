@@ -1,13 +1,19 @@
+hydra:
+  run:
+    dir: ${user.run_dir}
 user:
-  run_dir: ./output/pendulum_state/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  wandb_enabled: False
-  wandb_entity: ???
+  run_dir: ./output/benezerg/pendulum_state/${now:%Y-%m-%d}/${now:%H-%M-%S}_${user.wandb_suffix}
+  wandb_enabled: True
+  wandb_entity: GB-Northeastern-Projects
+  wandb_project: CS-7268-Group-Project
+  wandb_suffix: small_torque
+  wandb_name: pendulum_state_${user.wandb_suffix}
   load_lyaloss: null
-  Vmin_x_pgd_path: null
-  derivative_x_buffer_path: null
+  Vmin_x_pgd_path: null 
+  derivative_x_buffer_path: null 
 seed: 1234
 model:
-  load_lyaloss: models/pendulum_state_feedback.pth
+  load_lyaloss: null
   save_lyaloss: true
   limit_scale:
   - 1
@@ -34,8 +40,8 @@ train:
   train_lyaloss: true
   wandb:
     enabled: ${user.wandb_enabled}
-    project: neural_lyapunov_training
-    name: ${now:%Y.%m.%d-%H.%M.%S}_${wandb_name}
+    project: ${user.wandb_project}
+    name: ${now:%Y.%m.%d-%H.%M.%S}_${user.wandb_name}
     dir: ${user.run_dir}
     entity: ${user.wandb_entity}
   lr_scheduler: false
@@ -94,6 +100,5 @@ loss:
   - - 3.0
     - 6.0
   always_candidate_roa_regulizer: true
-wandb_name: pendulum
 approximate_lqr: false
 pgd_verifier_steps: 300

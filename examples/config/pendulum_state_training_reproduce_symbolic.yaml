@@ -6,7 +6,7 @@ user:
   wandb_enabled: True
   wandb_entity: GB-Northeastern-Projects
   wandb_project: CS-7268-Group-Project
-  wandb_suffix: reproduce
+  wandb_suffix: reproduce_symbolic
   wandb_name: pendulum_state_${user.wandb_suffix}
   load_lyaloss: null
   Vmin_x_pgd_path: null 
@@ -29,8 +29,8 @@ model:
   limit:
   - 12.0
   - 12
-  velocity_integration: ExplicitEuler
-  position_integration: ExplicitEuler
+  velocity_integration: RK4
+  position_integration: RK4
   dt: 0.05
   controller_nlayer: 4
   controller_hidden_dim: 8

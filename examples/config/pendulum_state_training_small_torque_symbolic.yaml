@@ -6,7 +6,7 @@ user:
   wandb_enabled: True
   wandb_entity: GB-Northeastern-Projects
   wandb_project: CS-7268-Group-Project
-  wandb_suffix: reproduce
+  wandb_suffix: small_torque_symbolic
   wandb_name: pendulum_state_${user.wandb_suffix}
   load_lyaloss: null
   Vmin_x_pgd_path: null 
@@ -15,7 +15,8 @@ seed: 1234
 model:
   load_lyaloss: null
   save_lyaloss: true
-  limit_scale: [1]
+  limit_scale:
+  - 1
   kappa: 0.01
   V_decrease_within_roa: true
   V_psd_form: L1
@@ -29,12 +30,12 @@ model:
   limit:
   - 12.0
   - 12
-  velocity_integration: ExplicitEuler
-  position_integration: ExplicitEuler
+  velocity_integration: RK4
+  position_integration: RK4
   dt: 0.05
   controller_nlayer: 4
   controller_hidden_dim: 8
-  u_max: 6
+  u_max: 0.75
 train:
   train_lyaloss: true
   wandb:
