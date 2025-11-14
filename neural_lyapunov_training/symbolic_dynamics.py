@@ -202,6 +202,9 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
             error_msg = "System validation failed:\n" + "\n".join(
                 f"  - {e}" for e in errors
             )
+            error_msg += "\n\nHINT: Did you use Symbol objects as parameter keys?"
+            error_msg += "\n  Correct:   {m: 1.0, l: 0.5}"
+            error_msg += "\n  Incorrect: {'m': 1.0, 'l': 0.5}"
             raise ValueError(error_msg)
 
         self._initialized = True
@@ -783,6 +786,15 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
     ) -> Dict[str, Union[bool, float]]:
         """
         Verify symbolic Jacobians against numerical finite differences
+    
+        Checks:
+        - A_match: Does ∂f/∂x from SymPy match autograd?
+        - B_match: Does ∂f/∂u from SymPy match autograd?
+        
+        Use for:
+        - Debugging symbolic derivations after system modifications
+        - Ensuring code generation correctness
+        - Validating against hardcoded implementations
 
         Args:
             x: State at which to verify (can be 1D or 2D)
@@ -1330,7 +1342,9 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
 
         Returns:
             A_cl: Closed-loop system matrix (2*nx, 2*nx)
-                State ordering: [x, x̂]
+                **State ordering**: [x[0], ..., x[nx-1], x̂[0], ..., x̂[nx-1]]
+                    First nx elements: true state
+                    Last nx elements:  estimate
 
         Example:
             >>> # Design LQG and analyze stability
@@ -1458,8 +1472,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         Compute next state: x[k+1] = discrete_dynamics(x, u[k])
     
         **CRITICAL DISTINCTION**: This method returns the NEXT STATE x[k+1], NOT
-        the derivative dx/dt. This is fundamentally different from continuous-time
-        systems and is what you typically want for simulation and discrete control.
+        the derivative dx/dt.
 
         Args:
             x: Current state
