@@ -5,6 +5,8 @@ A framework for defining dynamical systems symbolically using SymPy and
 automatically generating PyTorch-compatible numerical functions.
 """
 
+import copy
+import time
 import sympy as sp
 import numpy as np
 import scipy
@@ -15,6 +17,9 @@ from typing import Dict, List, Tuple, Union, Optional, Callable
 from enum import Enum
 import control
 import warnings
+import json
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 # Standard mapping from SymPy functions to PyTorch functions
@@ -399,8 +404,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
 
         all_vars = self.state_vars + self.control_vars
 
-        from sympy.printing.pycode import pycode
-
         # Generate function signature
         func_code_lines = [
             "def dynamics_func(" + ", ".join([str(v) for v in all_vars]) + "):",
@@ -458,7 +461,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         Raises:
             ValueError: If input dimensions don't match system dimensions
         """
-        import time
 
         start_time = time.time()
 
@@ -513,8 +515,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         Returns:
             (A, B): Linearized dynamics matrices as PyTorch tensors
         """
-        import time
-
         start_time = time.time()
 
         # Handle batched input
@@ -751,8 +751,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
 
     def clone(self):
         """Create a deep copy of the system"""
-        import copy
-
         return copy.deepcopy(self)
 
     def to_device(self, device: Union[str, torch.device]):
@@ -940,7 +938,6 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         Args:
             filename: Path to save configuration (supports .json, .yaml, .pt)
         """
-        import json
 
         config = {
             "class_name": self.__class__.__name__,
@@ -985,18 +982,65 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         u_eq: Optional[torch.Tensor] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute LQR control gain for continuous-time system
+        Compute LQR control gain for continuous-time system.
 
-        The control law is: u = K @ (x - x_eq) + u_eq
+        **IMPORTANT**: This method linearizes the nonlinear system around the
+        equilibrium point and computes the optimal gain for the linearized system.
+        The resulting controller is:
+        - Globally optimal for linear systems
+        - Locally optimal near equilibrium for nonlinear systems
+        - Performance degrades as state moves away from equilibrium
+
+        Theory:
+        ------
+        Solves the continuous-time algebraic Riccati equation (CARE):
+            A^T S + S A - S B R^{-1} B^T S + Q = 0
+
+        The optimal gain is:
+            K = -R^{-1} B^T S
+
+        Control law:
+            u(t) = K @ (x(t) - x_eq) + u_eq
+
+        Cost function minimized (for linearized system):
+            J = ∫[0,∞] [(x-x_eq)^T Q (x-x_eq) + (u-u_eq)^T R (u-u_eq)] dt
 
         Args:
-            Q: State cost matrix (nx, nx)
-            R: Control cost matrix (nu, nu) or scalar for single input
+            Q: State cost matrix (nx, nx). Must be positive semi-definite.
+            Larger values penalize state deviations more heavily.
+            R: Control cost matrix (nu, nu) or scalar for single input.
+            Must be positive definite. Larger values penalize control effort.
             x_eq: Equilibrium state (uses self.x_equilibrium if None)
             u_eq: Equilibrium control (uses self.u_equilibrium if None)
 
         Returns:
-            (K, S): Control gain matrix and solution to Riccati equation
+            K: Control gain matrix (nu, nx). Control law is u = K @ (x - x_eq) + u_eq
+            S: Solution to continuous-time Riccati equation (nx, nx)
+
+        Raises:
+            ValueError: If matrix dimensions are incompatible
+            LinAlgError: If Riccati equation has no stabilizing solution
+
+        Example:
+            >>> # Design LQR for pendulum
+            >>> pendulum = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+            >>> Q = np.diag([10.0, 1.0])  # Penalize angle more than velocity
+            >>> R = np.array([[0.1]])      # Small control cost
+            >>> K, S = pendulum.lqr_control(Q, R)
+            >>>
+            >>> # Apply control in simulation
+            >>> controller = lambda x: K @ (x - pendulum.x_equilibrium) + pendulum.u_equilibrium
+
+        Notes:
+            - The linearization is computed at (x_eq, u_eq) using symbolic differentiation
+            - For second-order systems, the full state-space linearization is used
+            - The method assumes (x_eq, u_eq) is a valid equilibrium point
+            - Stability is only guaranteed in a neighborhood of the equilibrium
+
+        See Also:
+            kalman_gain: Design optimal observer
+            lqg_control: Combined controller and observer design
+            linearized_dynamics: View the linearization used
         """
         if x_eq is None:
             x_eq = self.x_equilibrium
@@ -1049,18 +1093,70 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         u_eq: Optional[torch.Tensor] = None,
     ) -> np.ndarray:
         """
-        Compute Kalman filter gain for continuous-time system
+        Compute Kalman filter gain for continuous-time system.
 
-        Observer dynamics: dx̂/dt = f(x̂, u) + L(y - h(x̂))
+        **IMPORTANT**: This method linearizes the nonlinear system around the
+        equilibrium point and computes the optimal observer gain for the linearized
+        system. The resulting observer is:
+        - Globally optimal for linear systems with Gaussian noise
+        - Locally optimal near equilibrium for nonlinear systems
+        - Performance degrades as state moves away from equilibrium
+
+        Theory:
+        ------
+        Solves the continuous-time dual Riccati equation:
+            A P + P A^T - P C^T R^{-1} C P + Q = 0
+
+        The optimal gain is:
+            L = P C^T R^{-1}
+
+        Observer dynamics:
+            d x̂/dt = f(x̂, u) + L(y - h(x̂))
+
+        For linearized system:
+            d x̂/dt = A x̂ + B u + L(y - C x̂)
 
         Args:
-            Q_process: Process noise covariance (nx, nx)
-            R_measurement: Measurement noise covariance (ny, ny) or scalar
-            x_eq: Equilibrium state
-            u_eq: Equilibrium control
+            Q_process: Process noise covariance (nx, nx). Must be positive
+                    semi-definite. Represents uncertainty in dynamics.
+                    Default: 0.001 * I
+            R_measurement: Measurement noise covariance (ny, ny) or scalar.
+                        Must be positive definite. Represents sensor noise.
+                        Default: 0.001 * I
+            x_eq: Equilibrium state for linearization (uses self.x_equilibrium if None)
+            u_eq: Equilibrium control for linearization (uses self.u_equilibrium if None)
 
         Returns:
-            L: Kalman gain matrix (nx, ny)
+            L: Kalman gain matrix (nx, ny). Observer correction term is L @ innovation
+
+        Raises:
+            ValueError: If matrix dimensions are incompatible
+            LinAlgError: If dual Riccati equation has no stabilizing solution
+
+        Example:
+            >>> # Design Kalman filter for pendulum (measuring only angle)
+            >>> pendulum = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+            >>> Q_process = np.diag([0.001, 0.01])      # Process noise
+            >>> R_measurement = np.array([[0.1]])        # Measurement noise
+            >>> L = pendulum.kalman_gain(Q_process, R_measurement)
+            >>>
+            >>> # Use in observer
+            >>> observer = LinearObserver(pendulum, L)
+            >>> observer.update(u, y_measured, dt=0.01)
+            >>> x_estimate = observer.x_hat
+
+        Notes:
+            - The linearization is computed at (x_eq, u_eq) using symbolic differentiation
+            - Q_process represents model uncertainty and unmodeled disturbances
+            - R_measurement represents sensor noise characteristics
+            - Larger Q_process → trust measurements more (higher gain)
+            - Larger R_measurement → trust model more (lower gain)
+            - The observer is guaranteed stable for the linearized system
+
+        See Also:
+            lqr_control: Design optimal controller
+            lqg_control: Combined controller and observer design
+            ExtendedKalmanFilter: Nonlinear state estimation
         """
         if Q_process is None:
             Q_process = np.eye(self.nx) * 1e-3
@@ -1125,20 +1221,76 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
         R_measurement: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute LQG controller (LQR + Kalman filter)
+        Compute LQG controller (combined LQR controller + Kalman filter).
 
-        Returns both the control gain K and observer gain L for output feedback control:
-        - dx̂/dt = f(x̂, u) + L(y - h(x̂))
-        - u = K @ (x̂ - x_eq) + u_eq
+        **IMPORTANT**: This method designs an output feedback controller by combining:
+        1. LQR controller for the linearized dynamics
+        2. Kalman filter for the linearized observations
+
+        The separation principle guarantees that for LINEAR systems:
+        - Designing K and L separately is optimal
+        - The closed-loop stability equals the product of controller/observer poles
+
+        For NONLINEAR systems:
+        - This provides a locally optimal solution near equilibrium
+        - The separation principle does NOT hold globally
+        - Performance degrades away from the equilibrium point
+        - Consider adaptive or gain-scheduled approaches for large operating regions
+
+        Theory:
+        ------
+        Output feedback control law:
+            d x̂/dt = f(x̂, u) + L(y - h(x̂))    [Observer]
+            u = K @ (x̂ - x_eq) + u_eq         [Controller based on estimate]
+
+        For linearized system:
+            Closed-loop poles = {eig(A + BK)} ∪ {eig(A - LC)}
 
         Args:
-            Q_lqr: State cost for LQR
-            R_lqr: Control cost for LQR
-            Q_process: Process noise covariance
-            R_measurement: Measurement noise covariance
+            Q_lqr: State cost for LQR (nx, nx)
+            R_lqr: Control cost for LQR (nu, nu) or scalar
+            Q_process: Process noise covariance (nx, nx). Default: 0.001 * I
+            R_measurement: Measurement noise covariance (ny, ny) or scalar. Default: 0.001 * I
 
         Returns:
-            (K, L): Control gain and observer gain
+            K: LQR control gain (nu, nx)
+            L: Kalman observer gain (nx, ny)
+
+        Example:
+            >>> # Design LQG controller for pendulum with noisy measurements
+            >>> pendulum = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+            >>>
+            >>> # Controller costs
+            >>> Q_lqr = np.diag([10.0, 1.0])
+            >>> R_lqr = np.array([[0.1]])
+            >>>
+            >>> # Noise covariances
+            >>> Q_process = np.diag([0.001, 0.01])
+            >>> R_measurement = np.array([[0.1]])
+            >>>
+            >>> K, L = pendulum.lqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+            >>>
+            >>> # Simulate with observer-based control
+            >>> controller = LinearController(K, pendulum.x_equilibrium, pendulum.u_equilibrium)
+            >>> observer = LinearObserver(pendulum, L)
+            >>>
+            >>> for t in range(steps):
+            >>>     y = measure(x_true)  # Noisy measurement
+            >>>     observer.update(u, y, dt)
+            >>>     u = controller(observer.x_hat)
+            >>>     x_true = step_dynamics(x_true, u, dt)
+
+        Notes:
+            - Separation principle: K and L can be designed independently (for linear systems)
+            - The controller never sees the true state, only the estimate x̂
+            - Closed-loop has 2*nx states: [x, x̂] (true state and estimate)
+            - For nonlinear systems, consider EKF for the observer instead
+
+        See Also:
+            lqr_control: Controller design only
+            kalman_gain: Observer design only
+            lqg_closed_loop_matrix: Analyze closed-loop stability
+            ExtendedKalmanFilter: Nonlinear observer alternative
         """
         K, _ = self.lqr_control(Q_lqr, R_lqr)
         L = self.kalman_gain(Q_process, R_measurement)
@@ -1146,22 +1298,62 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
 
     def lqg_closed_loop_matrix(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
-        Compute closed-loop system matrix for LQG control
+        Compute closed-loop system matrix for LQG control.
 
-        Augmented state: [x, x̂] where x̂ is the estimate
-        Closed-loop dynamics:
-            dx/dt = f(x, K(x̂ - x_eq) + u_eq)
-            dx̂/dt = f(x̂, K(x̂ - x_eq) + u_eq) + L(h(x) - h(x̂))
+        Returns the linearized dynamics of the augmented system [x, x̂] where:
+        - x is the true state
+        - x̂ is the observer's state estimate
 
-        Linearized around equilibrium:
-            d[x, x̂]/dt = A_cl [x, x̂]
+        Theory:
+        ------
+        Closed-loop dynamics (linearized):
+            d/dt [x  ]  = [A + BK    -BK   ] [x  ]
+                 [x̂ ]   = [LC      A+BK-LC ] [x̂ ]
+
+        Or equivalently in terms of state and estimation error e = x - x̂:
+            d/dt [x]  = [A + BK   -BK ] [x]
+                 [e]    [0      A - LC] [e]
+
+        Eigenvalues:
+            eig(A_cl) = {eig(A + BK)} ∪ {eig(A - LC)}
+
+        This shows the separation principle: closed-loop poles are the union
+        of controller poles and observer poles (for linear systems).
 
         Args:
-            K: LQR control gain (nu, nx)
-            L: Kalman filter gain (nx, ny)
+            K: LQR control gain (nu, nx) from lqr_control()
+            L: Kalman filter gain (nx, ny) from kalman_gain()
 
         Returns:
             A_cl: Closed-loop system matrix (2*nx, 2*nx)
+                State ordering: [x, x̂]
+
+        Example:
+            >>> # Design LQG and analyze stability
+            >>> K, L = system.lqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+            >>> A_cl = system.lqg_closed_loop_matrix(K, L)
+            >>>
+            >>> # Check stability
+            >>> eigenvalues = np.linalg.eigvals(A_cl)
+            >>> is_stable = np.all(np.real(eigenvalues) < 0)
+            >>> print(f"Closed-loop stable: {is_stable}")
+            >>>
+            >>> # Compare with open-loop
+            >>> A, B = system.linearized_dynamics(x_eq, u_eq)
+            >>> open_loop_eigs = np.linalg.eigvals(A)
+            >>> print(f"Open-loop poles: {open_loop_eigs}")
+            >>> print(f"Closed-loop poles: {eigenvalues}")
+
+        Notes:
+            - All eigenvalues should have negative real parts for stability
+            - The matrix has block structure showing separation principle
+            - Small entries (< 1e-6) are zeroed for numerical cleanliness
+            - This is the linearized closed-loop; nonlinear behavior may differ
+
+        See Also:
+            lqg_control: Design the gains K and L
+            eigenvalues_at_equilibrium: Open-loop eigenvalues
+            is_stable_equilibrium: Check open-loop stability
         """
         x_eq = self.x_equilibrium.unsqueeze(0)
         u_eq = self.u_equilibrium.unsqueeze(0)
@@ -1345,8 +1537,6 @@ class GenericDiscreteTimeSystem(nn.Module):
             T = u_sequence.shape[1]
 
             if horizon is not None and horizon != T:
-                import warnings
-
                 warnings.warn(
                     f"horizon={horizon} specified but control sequence has length {T}. "
                     f"Using sequence length T={T}."
@@ -1768,18 +1958,67 @@ class GenericDiscreteTimeSystem(nn.Module):
         u_eq: Optional[torch.Tensor] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute discrete-time LQR control gain
+        Compute discrete-time LQR control gain.
 
-        The control law is: u = K @ (x - x_eq) + u_eq
+        **IMPORTANT**: This method linearizes the nonlinear discrete-time system
+        around the equilibrium point and computes the optimal gain for the linearized
+        system. The resulting controller is:
+        - Globally optimal for linear discrete-time systems
+        - Locally optimal near equilibrium for nonlinear systems
+        - Performance degrades as state moves away from equilibrium
+
+        Theory:
+        ------
+        Solves the discrete-time algebraic Riccati equation (DARE):
+            S = Q + A^T S A - A^T S B (R + B^T S B)^{-1} B^T S A
+
+        The optimal gain is:
+            K = -(R + B^T S B)^{-1} B^T S A
+
+        Control law:
+            u[k] = K @ (x[k] - x_eq) + u_eq
+
+        Cost function minimized (for linearized system):
+            J = Σ[k=0,∞] [(x[k]-x_eq)^T Q (x[k]-x_eq) + (u[k]-u_eq)^T R (u[k]-u_eq)]
 
         Args:
-            Q: State cost matrix (nx, nx)
-            R: Control cost matrix (nu, nu) or scalar for single input
-            x_eq: Equilibrium state
-            u_eq: Equilibrium control
+            Q: State cost matrix (nx, nx). Must be positive semi-definite.
+            R: Control cost matrix (nu, nu) or scalar. Must be positive definite.
+            x_eq: Equilibrium state (uses self.x_equilibrium if None)
+            u_eq: Equilibrium control (uses self.u_equilibrium if None)
 
         Returns:
-            (K, S): Control gain matrix and solution to discrete Riccati equation
+            K: Discrete control gain matrix (nu, nx)
+            S: Solution to discrete-time Riccati equation (nx, nx)
+
+        Raises:
+            ValueError: If matrix dimensions are incompatible
+            LinAlgError: If DARE has no stabilizing solution
+
+        Example:
+            >>> # Create discrete-time system
+            >>> pendulum_ct = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+            >>> pendulum_dt = GenericDiscreteTimeSystem(pendulum_ct, dt=0.01)
+            >>>
+            >>> # Design discrete LQR
+            >>> Q = np.diag([10.0, 1.0])
+            >>> R = np.array([[0.1]])
+            >>> K, S = pendulum_dt.dlqr_control(Q, R)
+            >>>
+            >>> # Simulate
+            >>> controller = lambda x: K @ (x - pendulum_dt.x_equilibrium) + pendulum_dt.u_equilibrium
+            >>> trajectory = pendulum_dt.simulate(x0, controller, horizon=1000)
+
+        Notes:
+            - Linearization uses the discretization method specified in __init__
+            - For second-order systems, the full discrete state-space form is used
+            - Closed-loop eigenvalues should satisfy |λ| < 1 for stability
+            - Discrete LQR often performs better than discretized continuous LQR
+
+        See Also:
+            lqr_control: Continuous-time version
+            discrete_kalman_gain: Discrete observer design
+            dlqg_control: Combined controller and observer
         """
         if x_eq is None:
             x_eq = self.x_equilibrium
@@ -1822,17 +2061,62 @@ class GenericDiscreteTimeSystem(nn.Module):
         x_eq: Optional[torch.Tensor] = None,
     ) -> np.ndarray:
         """
-        Compute discrete-time Kalman filter gain
+        Compute discrete-time Kalman filter gain.
 
-        Observer update: x̂[k+1] = f_discrete(x̂[k], u[k]) + L(y[k+1] - h(f_discrete(x̂[k], u[k])))
+        **IMPORTANT**: This method linearizes the nonlinear discrete-time system
+        and computes the optimal observer gain for the linearized system. For
+        nonlinear systems, this provides local optimality near equilibrium.
+
+        Theory:
+        ------
+        Solves the discrete-time dual Riccati equation:
+            P = Q + A P A^T - A P C^T (C P C^T + R)^{-1} C P A^T
+
+        The optimal gain is:
+            L = P C^T (C P C^T + R)^{-1}
+
+        Observer update:
+            x̂[k|k-1] = f(x̂[k-1|k-1], u[k-1])    [Predict]
+            x̂[k|k] = x̂[k|k-1] + L(y[k] - h(x̂[k|k-1]))    [Update]
+
+        For linearized system:
+            x̂[k+1|k] = A x̂[k|k] + B u[k]
+            x̂[k|k] = x̂[k|k-1] + L(y[k] - C x̂[k|k-1])
 
         Args:
-            Q_process: Process noise covariance (nx, nx)
-            R_measurement: Measurement noise covariance (ny, ny) or scalar
-            x_eq: Equilibrium state
+            Q_process: Process noise covariance (nx, nx). Default: 0.001 * I
+            R_measurement: Measurement noise covariance (ny, ny) or scalar. Default: 0.001 * I
+            x_eq: Equilibrium state for linearization (uses self.x_equilibrium if None)
 
         Returns:
             L: Kalman gain matrix (nx, ny)
+
+        Example:
+            >>> # Create discrete system
+            >>> pendulum_ct = SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
+            >>> pendulum_dt = GenericDiscreteTimeSystem(pendulum_ct, dt=0.01)
+            >>>
+            >>> # Design Kalman filter
+            >>> Q_process = np.diag([0.001, 0.01])
+            >>> R_measurement = np.array([[0.1]])
+            >>> L = pendulum_dt.discrete_kalman_gain(Q_process, R_measurement)
+            >>>
+            >>> # Use in simulation
+            >>> observer = LinearObserver(pendulum_dt, L)
+            >>> for k in range(steps):
+            >>>     observer.update(u[k], y_measured[k], dt=pendulum_dt.dt)
+            >>>     x_estimate = observer.x_hat
+
+        Notes:
+            - This is the steady-state Kalman gain (infinite horizon)
+            - For time-varying gain, implement a Kalman filter loop
+            - The gain balances prediction uncertainty and measurement noise
+            - Linearization matches the integration method used for dynamics
+
+        See Also:
+            dlqr_control: Discrete controller design
+            dlqg_control: Combined controller and observer
+            ExtendedKalmanFilter: Nonlinear filtering
         """
         if Q_process is None:
             Q_process = np.eye(self.nx) * 1e-3
@@ -1882,10 +2166,67 @@ class GenericDiscreteTimeSystem(nn.Module):
         R_measurement: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute discrete-time LQG controller
+        Compute discrete-time LQG controller (LQR + Kalman filter).
+
+        **IMPORTANT**: Designs output feedback control for the linearized discrete-time
+        system. The separation principle applies to linear systems but not globally
+        to nonlinear systems.
+
+        Theory:
+        ------
+        Discrete-time LQG control:
+            x̂[k|k-1] = f(x̂[k-1|k-1], u[k-1])           [Predict]
+            x̂[k|k] = x̂[k|k-1] + L(y[k] - h(x̂[k|k-1]))  [Correct]
+            u[k] = K @ (x̂[k|k] - x_eq) + u_eq          [Control]
+
+        Closed-loop eigenvalues (for linear system):
+            eig(A_cl) = {eig(A + BK)} ∪ {eig(A - LC)}
+
+        Args:
+            Q_lqr: State cost for LQR (nx, nx)
+            R_lqr: Control cost for LQR (nu, nu) or scalar
+            Q_process: Process noise covariance (nx, nx). Default: 0.001 * I
+            R_measurement: Measurement noise covariance (ny, ny) or scalar. Default: 0.001 * I
 
         Returns:
-            (K, L): Control gain and observer gain
+            K: Discrete LQR control gain (nu, nx)
+            L: Discrete Kalman gain (nx, ny)
+
+        Example:
+            >>> # Create discrete system
+            >>> quad_ct = SymbolicQuadrotor2D()
+            >>> quad_dt = GenericDiscreteTimeSystem(quad_ct, dt=0.01,
+            ...                                     integration_method=IntegrationMethod.RK4)
+            >>>
+            >>> # Design LQG controller
+            >>> Q_lqr = np.diag([10, 10, 5, 1, 1, 1])  # Position > velocity
+            >>> R_lqr = np.eye(2) * 0.1
+            >>> Q_process = np.eye(6) * 0.01
+            >>> R_measurement = np.eye(3) * 0.1  # Measure [x, y, theta]
+            >>>
+            >>> K, L = quad_dt.dlqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+            >>>
+            >>> # Simulate with observer feedback
+            >>> controller = LinearController(K, quad_dt.x_equilibrium, quad_dt.u_equilibrium)
+            >>> observer = LinearObserver(quad_dt, L)
+            >>>
+            >>> x = x0
+            >>> for k in range(1000):
+            >>>     y = quad_dt.h(x) + measurement_noise()
+            >>>     observer.update(u, y, dt=quad_dt.dt)
+            >>>     u = controller(observer.x_hat)
+            >>>     x = quad_dt(x, u)
+
+        Notes:
+            - Separation principle: design K and L independently (for linear systems)
+            - Discrete-time implementation more natural for digital control
+            - Observer and controller run at the same rate (dt)
+            - For different rates, use multirate control techniques
+
+        See Also:
+            dlqr_control: Controller only
+            discrete_kalman_gain: Observer only
+            dlqg_closed_loop_matrix: Closed-loop analysis
         """
         K, _ = self.dlqr_control(Q_lqr, R_lqr)
         L = self.discrete_kalman_gain(Q_process, R_measurement)
@@ -1893,14 +2234,58 @@ class GenericDiscreteTimeSystem(nn.Module):
 
     def dlqg_closed_loop_matrix(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
-        Compute closed-loop discrete system matrix for LQG control
+        Compute closed-loop discrete system matrix for LQG control.
+
+        Returns the linearized dynamics of the augmented discrete-time system [x, x̂].
+
+        Theory:
+        ------
+        Closed-loop discrete dynamics:
+            [x[k+1]]  = [A + BK       -BK    ] [x[k]]
+            [x̂[k+1]]  = [LC           A+BK-LC] [x̂[k]]
+
+        Eigenvalues (for linear systems):
+            eig(A_cl) = {eig(A + BK)} ∪ {eig(A - LC)}
+
+        Stability condition:
+            All eigenvalues must satisfy |λ| < 1
 
         Args:
-            K: Discrete LQR control gain (nu, nx)
-            L: Discrete Kalman filter gain (nx, ny)
+            K: Discrete LQR gain (nu, nx) from dlqr_control()
+            L: Discrete Kalman gain (nx, ny) from discrete_kalman_gain()
 
         Returns:
-            A_cl: Closed-loop system matrix (2*nx, 2*nx)
+            A_cl: Closed-loop discrete system matrix (2*nx, 2*nx)
+
+        Example:
+            >>> # Design and analyze discrete LQG
+            >>> K, L = system.dlqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+            >>> A_cl = system.dlqg_closed_loop_matrix(K, L)
+            >>>
+            >>> # Check discrete stability
+            >>> eigenvalues = np.linalg.eigvals(A_cl)
+            >>> is_stable = np.all(np.abs(eigenvalues) < 1.0)
+            >>> print(f"Closed-loop stable: {is_stable}")
+            >>> print(f"Spectral radius: {np.max(np.abs(eigenvalues)):.4f}")
+            >>>
+            >>> # Visualize eigenvalues on unit circle
+            >>> import matplotlib.pyplot as plt
+            >>> theta = np.linspace(0, 2*np.pi, 100)
+            >>> plt.plot(np.cos(theta), np.sin(theta), 'k--', label='Unit circle')
+            >>> plt.plot(eigenvalues.real, eigenvalues.imag, 'rx', label='Poles')
+            >>> plt.axis('equal')
+            >>> plt.legend()
+            >>> plt.show()
+
+        Notes:
+            - Eigenvalues inside unit circle → stable
+            - Eigenvalues on unit circle → marginally stable
+            - Eigenvalues outside unit circle → unstable
+            - Small entries (< 1e-6) are zeroed for cleanliness
+
+        See Also:
+            dlqg_control: Design the gains
+            output_feedback_lyapunov: Lyapunov stability analysis
         """
         x_eq = self.x_equilibrium.unsqueeze(0)
         u_eq = self.u_equilibrium.unsqueeze(0)
@@ -1946,18 +2331,55 @@ class GenericDiscreteTimeSystem(nn.Module):
 
     def output_feedback_lyapunov(self, K: np.ndarray, L: np.ndarray) -> np.ndarray:
         """
-        Solve discrete-time Lyapunov equation for output feedback system
+        Solve discrete-time Lyapunov equation for output feedback system.
 
-        For verifying stability of the closed-loop system
+        **IMPORTANT**: This solves the Lyapunov equation for the LINEARIZED
+        closed-loop system around equilibrium. The resulting Lyapunov function
+        V(z) = z^T S z proves:
+        - Global asymptotic stability for LINEAR systems
+        - LOCAL asymptotic stability for NONLINEAR systems (near equilibrium only)
+
+        Finds positive definite matrix S satisfying:
+            A_cl^T S A_cl - S + I = 0
+
+        where A_cl is the LINEARIZED closed-loop system matrix.
 
         Args:
-            K: Control gain
-            L: Observer gain
+            K: Control gain (nu, nx)
+            L: Observer gain (nx, ny)
 
         Returns:
-            S: Solution to discrete Lyapunov equation
+            S: Solution to discrete Lyapunov equation (2*nx, 2*nx)
+            Positive definite if linearized closed-loop is stable
+
+        Example:
+            >>> K, L = system.dlqg_control(Q_lqr, R_lqr, Q_process, R_measurement)
+            >>> S = system.output_feedback_lyapunov(K, L)
+            >>>
+            >>> # Verify LOCAL stability
+            >>> eigenvalues = np.linalg.eigvals(S)
+            >>> is_positive_definite = np.all(eigenvalues > 0)
+            >>> print(f"Linearized system locally stable: {is_positive_definite}")
+            >>>
+            >>> # WARNING: This doesn't estimate region of attraction!
+            >>> # For nonlinear system, stability only guaranteed near equilibrium
+            >>> def lyapunov_function(z):
+            >>>     '''V(z) proves local stability, not global'''
+            >>>     return z.T @ S @ z
+            >>>
+            >>> # To estimate region: sample many initial conditions
+            >>> # and check which ones converge (Monte Carlo approach)
+
+        Notes:
+            - Positive definite S → linearized closed-loop is asymptotically stable
+            - For nonlinear systems: only proves local stability
+            - The linearization is computed at (x_eq, u_eq)
+            - Does NOT provide region of attraction estimate
+
+        See Also:
+            dlqg_closed_loop_matrix: Get the linearized closed-loop matrix A_cl
+            dlqg_control: Design the gains
         """
-        import control
 
         A_cl = self.dlqg_closed_loop_matrix(K, L)
         S = control.dlyap(A_cl, np.eye(2 * self.nx))
@@ -2104,12 +2526,6 @@ class GenericDiscreteTimeSystem(nn.Module):
             save_html: If provided, save interactive plot to this HTML file
             show: If True, display the plot
         """
-        try:
-            import plotly.graph_objects as go
-            from plotly.subplots import make_subplots
-        except ImportError:
-            print("Error: plotly not installed. Install with: pip install plotly")
-            return
 
         # Handle batched trajectories
         if len(trajectory.shape) == 3:
@@ -2241,11 +2657,6 @@ class GenericDiscreteTimeSystem(nn.Module):
             save_html: If provided, save to this HTML file
             show: If True, display the plot
         """
-        try:
-            import plotly.graph_objects as go
-        except ImportError:
-            print("Error: plotly not installed. Install with: pip install plotly")
-            return
 
         # Handle batched trajectories
         if len(trajectory.shape) == 3:
