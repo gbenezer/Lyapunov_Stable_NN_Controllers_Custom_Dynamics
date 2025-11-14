@@ -2,8 +2,6 @@ annotated-types==0.7.0
 antlr4-python3-runtime==4.9.3
 appdirs==1.4.4
 astroid==4.0.1
-# Editable install with no version control (auto_LiRPA==0.6.0)
-# Need to install compatible auto_LiRPA for use of repository
 -e git+https://github.com/Verified-Intelligence/auto_LiRPA.git@28da3d0148ce320142f4a50b485ac71bca7acc3b#egg=auto_LiRPA&subdirectory=../../auto_LiRPA
 black==24.1.1
 certifi==2025.10.5
@@ -33,12 +31,14 @@ joblib==1.5.2
 kiwisolver==1.4.9
 markdown-it-py==4.0.0
 MarkupSafe==3.0.3
+mathjax==0.1.2
 matplotlib==3.8.2
 mccabe==0.7.0
 mdurl==0.1.2
 ml_dtypes==0.5.3
 mpmath==1.3.0
 mypy_extensions==1.1.0
+narwhals==2.10.2
 networkx==3.5
 ninja==1.11.1.1
 numpy==1.26.2
@@ -56,7 +56,6 @@ nvidia-nvjitlink-cu12==12.9.86
 nvidia-nvtx-cu12==12.1.105
 omegaconf==2.3.0
 onnx==1.19.1
-# Editable install with no version control
 onnx2pytorch @ git+https://github.com/Verified-Intelligence/onnx2pytorch.git@8afb2243fddd1a4732883f1e2959f7e83f8201c5
 onnxoptimizer==0.3.13
 onnxruntime==1.23.1
@@ -66,6 +65,7 @@ pandas==2.3.3
 pathspec==0.12.1
 pillow==12.0.0
 platformdirs==4.5.0
+plotly==6.4.0
 pluggy==1.6.0
 protobuf==4.25.8
 psutil==7.1.1
