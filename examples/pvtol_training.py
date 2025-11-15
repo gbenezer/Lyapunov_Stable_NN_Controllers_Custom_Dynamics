@@ -1,5 +1,7 @@
 import os
+from path import Path
 import pdb
+from datetime.datetime import now
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,6 +18,10 @@ import neural_lyapunov_training.models as models
 import neural_lyapunov_training.pvtol as pvtol
 import neural_lyapunov_training.train_utils as train_utils
 import neural_lyapunov_training.output_train_utils as output_train_utils
+import neural_lyapunov_training.symbolic_dynamics as sd
+import neural_lyapunov_training.symbolic_systems as ss
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
 
 device = torch.device("cuda")
 dtype = torch.float
@@ -184,58 +190,34 @@ if __name__ == "__main__":
     )
 
     arguments.Config.parse_config()
-    train_utils.set_seed(arguments.Config["general"]["seed"])
-
-    if arguments.Config["general"]["dump_path"]:
-        arguments.Config.dump_config(
-            arguments.Config.all_args,
-            out_to_doc=arguments.Config["general"]["dump_path"],
-        )
+    train_utils.set_seed(42)
 
     dt = 0.05
-    pvtol_continuous = dynamics = pvtol.PvtolDynamics(dt=dt)
-
-    print("Check equilibrium")
-    print(
-        dynamics(
-            pvtol_continuous.x_equilibrium.unsqueeze(0),
-            pvtol_continuous.u_equilibrium.unsqueeze(0),
-        )
+    pvtol_continuous = ss.PVTOL()
+    dynamics = sd.GenericDiscreteTimeSystem(
+        pvtol_continuous,
+        dt=dt,
+        integration_method=sd.IntegrationMethod.RK4,
+        position_integration=sd.IntegrationMethod.RK4,
     )
 
-    limit_scale = arguments.Config["model"]["limit_scale"]
-    # limit = limit_scale * torch.tensor([0.75, 0.75, np.pi/2, 4, 4, 3],
-    #                                     dtype=dtype, device=device)
+    limit_scale = 1.0
     limit = limit_scale * torch.tensor(
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=dtype, device=device
+        [0.75, 0.75, np.pi / 2, 4, 4, 3], dtype=dtype, device=device
     )
+    # limit = limit_scale * torch.tensor(
+    #     [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=dtype, device=device
+    # )
     lower_limit = -limit
     upper_limit = limit
     grid_size = torch.tensor([4, 4, 6, 5, 5, 6], device=device)
 
     Q = np.diag(np.array([1, 1, 1, 10, 10, 10.0]))
     R = np.diag(np.array([10, 10.0]))
-    K, S = pvtol_continuous.lqr_control(
-        Q, R, pvtol_continuous.x_equilibrium, pvtol_continuous.u_equilibrium
-    )
+    K, S = pvtol_continuous.lqr_control(Q, R)
     K_torch = torch.from_numpy(K).type(dtype).to(device)
     S_torch = torch.from_numpy(S).type(dtype).to(device)
-
-    V = (
-        lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True) / 50
-    )  # Scale V_lqr to be in [0, 10]
-    u = lambda x: x @ K_torch.T + pvtol_continuous.u_equilibrium.to(device)
-
-    # From Junlin Wu's code
-    # lqr_weight = nn.Parameter(torch.FloatTensor(
-    #     [[0.70710678, -0.70710678, -5.03954871,  1.10781077, -1.82439774, -1.20727555],
-    #     [-0.70710678, -0.70710678,  5.03954871, -1.10781077, -1.82439774, 1.20727555]]))
-    # controller_target = lambda x: x.matmul(lqr_weight.t())
-
     max_u = torch.tensor([1, 1.0], device=device) * 39.2
-    controller_target = lambda x: torch.clamp(
-        u(x), min=torch.tensor([0, 0.0], device=device), max=max_u
-    )
 
     controller = controllers.NeuralNetworkController(
         nlayer=2,
@@ -248,54 +230,44 @@ if __name__ == "__main__":
         x_equilibrium=(dynamics.x_equilibrium).to(device).to(dtype),
         u_equilibrium=(dynamics.u_equilibrium).to(device).to(dtype),
     )
+    controller.train()
 
     absolute_output = True
-    R = torch.linalg.cholesky(S_torch)
-    lyapunov_nn = lyapunov.NeuralNetworkQuadraticLyapunov(
+    lyapunov_nn = lyapunov.NeuralNetworkLyapunov(
         goal_state=torch.zeros(6, dtype=dtype).to(device),
+        hidden_widths=[16, 16, 8],
         x_dim=6,
-        R_rows=6,
+        R_rows=3,
+        absolute_output=absolute_output,
         eps=0.01,
-        R=R,
+        activation=nn.LeakyReLU,
+        V_psd_form="L1",
     )
+    lyapunov_nn.train()
 
     dynamics.to(device).to(dtype)
     controller.to(device).to(dtype)
     lyapunov_nn.to(device).to(dtype)
 
-    output_train_utils.approximate_controller(
-        controller_target,
-        controller,
-        6,
-        limit,
-        0,
-        lambda x: pvtol_continuous.h(x),
-        "examples/data/pvtol/controller_lqr_[8, 8].pth",
-        max_iter=500,
-        lr=0.08,
-        l1_reg=0.001,
-    )
     # output_train_utils.approximate_controller(V, lyapunov_nn, 6, limit, 0, 0, "examples/data/pvtol/lyapunov_{}.pth".format(lyapunov_hidden_widths), max_iter=500, lr=0.05, l1_reg=0.01)
 
-    controller.load_state_dict(
-        torch.load("examples/data/pvtol/controller_lqr_[8, 8].pth")
-    )
-    controller.eval()
+    # controller.load_state_dict(
+    #     torch.load("examples/data/pvtol/controller_lqr_[8, 8].pth")
+    # )
+    # controller.eval()
 
-    kappa = arguments.Config["model"]["kappa"]
-    hard_max = arguments.Config["train"]["hard_max"]
+    kappa = 0.01
+    hard_max = True
     derivative_lyaloss = lyapunov.LyapunovDerivativeLoss(
-        dynamics, controller, lyapunov_nn, kappa=kappa, hard_max=hard_max
+        dynamics,
+        controller,
+        lyapunov_nn,
+        kappa=kappa,
+        hard_max=hard_max,
+        box_lo=0,
+        box_up=0,
+        rho_multiplier=2.25,
     )
-
-    # if arguments.Config["train"]["approximate_lqr_lyaloss"] is not None:
-    #     approximate_lqr(pvtol_continuous, controller, lyapunov_nn)
-    #     torch.save({"state_dict": derivative_lyaloss.state_dict()},
-    #                arguments.Config["train"]["approximate_lqr_lyaloss"])
-
-    if arguments.Config["model"]["load_lyaloss"] is not None:
-        load_lyaloss = arguments.Config["model"]["load_lyaloss"]
-        derivative_lyaloss.load_state_dict(torch.load(load_lyaloss)["state_dict"])
 
     if absolute_output:
         positivity_lyaloss = None
@@ -304,14 +276,12 @@ if __name__ == "__main__":
             lyapunov_nn, 0.01 * torch.eye(2, dtype=dtype, device=device)
         )
 
-    candidate_scale = arguments.Config["loss"]["candidate_scale"]
-    candidate_roa_states_weight = arguments.Config["loss"][
-        "candidate_roa_states_weight"
-    ]
-    data_folder = f"examples/data/pvtol/{limit_scale}"
+    candidate_scale = 2.0
+    candidate_roa_states_weight = 1.0e-05
+    data_folder = f"./output/benezerg/pvtol_state/{now():%Y-%m-%d}/{now():%H-%M-%S}"
     os.makedirs(data_folder, exist_ok=True)
-    save_lyaloss = arguments.Config["model"]["save_lyaloss"]
-    V_decrease_within_roa = arguments.Config["model"]["V_decrease_within_roa"]
+    save_lyaloss = True
+    V_decrease_within_roa = True
     save_lyaloss_path = None
     save_name = (
         f"lyaloss_{kappa}kappa_{candidate_scale}_{candidate_roa_states_weight}.pth"
@@ -319,81 +289,76 @@ if __name__ == "__main__":
     if save_lyaloss:
         save_lyaloss_path = f"{data_folder}/{save_name}"
 
-    if arguments.Config["train"]["enable_wandb"]:
-        wandb.init(project="pvtol", entity="zshi")
-        wandb.config.update(arguments.Config.all_args)
-        wandb.run.name = f"{limit_scale}/{save_name}"
+    wandb.init(
+        project="CS-7268-Group-Project",
+        entity="GB-Northeastern-Projects",
+        name=f"{now():%Y-%m-%d}_{now():%H-%M-%S}_pvtol_state",
+    )
 
-    if arguments.Config["train"]["train_lyaloss"]:
-        permute_array = [[-1, 1]] * pvtol_continuous.nx
-        permute_array_torch = torch.tensor(
-            list(itertools.product(*permute_array)), device=device
-        )
-        candidate_roa_states = permute_array_torch * upper_limit
-        if candidate_scale < 1:
-            # Sample on level set of V_lqr and scale between (0, 1)
-            V_candidate = V(candidate_roa_states)
-            V_max = torch.max(V_candidate)
-            candidate_roa_states = (
-                candidate_roa_states / torch.sqrt(V_candidate / V_max) * candidate_scale
-            )
-        else:
-            x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
-                lyapunov_nn,
-                lower_limit,
-                upper_limit,
-                num_samples_per_boundary=1000,
-                eps=limit,
-                steps=100,
-                direction="minimize",
-            )
-            rho = lyapunov_nn(x_min_boundary).min().item()
-            # Sample slightly outside the current ROA
-            V_candidate = lyapunov_nn(candidate_roa_states).clone().detach()
-            candidate_roa_states = (
-                candidate_roa_states / torch.sqrt(V_candidate / rho) * candidate_scale
-            )
-        candidate_roa_states = torch.clamp(
-            candidate_roa_states, min=lower_limit, max=upper_limit
-        )
-        train_utils.train_lyapunov_with_buffer(
-            derivative_lyaloss=derivative_lyaloss,
-            positivity_lyaloss=positivity_lyaloss,
-            observer_loss=None,
-            lower_limit=lower_limit,
-            upper_limit=upper_limit,
-            grid_size=grid_size,
-            learning_rate=arguments.Config["train"]["learning_rate"],
-            weight_decay=0.0,
-            max_iter=arguments.Config["train"]["max_iter"],
-            enable_wandb=arguments.Config["train"]["enable_wandb"],
-            derivative_ibp_ratio=arguments.Config["loss"]["ibp_ratio_derivative"],
-            derivative_sample_ratio=arguments.Config["loss"]["sample_ratio_derivative"],
-            positivity_ibp_ratio=arguments.Config["loss"]["ibp_ratio_positivity"],
-            positivity_sample_ratio=arguments.Config["loss"]["sample_ratio_positivity"],
-            save_best_model=save_lyaloss_path,
-            pgd_steps=arguments.Config["train"]["pgd_steps"],
-            buffer_size=arguments.Config["train"]["buffer_size"],
-            batch_size=arguments.Config["train"]["batch_size"],
-            epochs=arguments.Config["train"]["epochs"],
-            samples_per_iter=arguments.Config["train"]["samples_per_iter"],
-            l1_reg=arguments.Config["loss"]["l1_reg"],
-            num_samples_per_boundary=arguments.Config["train"][
-                "num_samples_per_boundary"
-            ],
-            V_decrease_within_roa=V_decrease_within_roa,
-            Vmin_x_boundary_weight=arguments.Config["loss"]["Vmin_x_boundary_weight"],
-            Vmax_x_boundary_weight=arguments.Config["loss"]["Vmax_x_boundary_weight"],
-            candidate_roa_states=candidate_roa_states,
-            candidate_roa_states_weight=arguments.Config["loss"][
-                "candidate_roa_states_weight"
-            ],
-            hard_max=hard_max,
-            lr_scheduler=arguments.Config["train"]["lr_scheduler"],
-        )
+    permute_array = [[-1, 1]] * pvtol_continuous.nx
+    permute_array_torch = torch.tensor(
+        list(itertools.product(*permute_array)), device=device
+    )
+    candidate_roa_states = permute_array_torch * upper_limit
+    x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
+        lyapunov_nn,
+        lower_limit,
+        upper_limit,
+        num_samples_per_boundary=1000,
+        eps=limit,
+        steps=100,
+        direction="minimize",
+    )
+    rho = lyapunov_nn(x_min_boundary).min().item()
+    # Sample slightly outside the current ROA
+    V_candidate = lyapunov_nn(candidate_roa_states).clone().detach()
+    candidate_roa_states = (
+        candidate_roa_states / torch.sqrt(V_candidate / rho) * candidate_scale
+    )
+    candidate_roa_states = torch.clamp(
+        candidate_roa_states, min=lower_limit, max=upper_limit
+    )
+    train_utils.train_lyapunov_with_buffer(
+        derivative_lyaloss=derivative_lyaloss,
+        positivity_lyaloss=positivity_lyaloss,
+        observer_loss=None,
+        lower_limit=lower_limit,
+        upper_limit=upper_limit,
+        grid_size=grid_size,
+        learning_rate=0.001,
+        weight_decay=0.0,
+        max_iter=150,
+        enable_wandb=True,
+        derivative_ibp_ratio=0,
+        derivative_sample_ratio=1,
+        positivity_ibp_ratio=0,
+        positivity_sample_ratio=0,
+        save_best_model=save_lyaloss_path,
+        pgd_steps=150,
+        buffer_size=131072,
+        batch_size=1024,
+        epochs=100,
+        samples_per_iter=16384,
+        l1_reg=0,
+        num_samples_per_boundary=1024,
+        V_decrease_within_roa=V_decrease_within_roa,
+        Vmin_x_boundary_weight=0,
+        Vmax_x_boundary_weight=0,
+        candidate_roa_states=candidate_roa_states,
+        candidate_roa_states_weight=1.0e-05,
+        hard_max=hard_max,
+        lr_scheduler=False,
+    )
 
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
-        dynamics, controller, lyapunov_nn, kappa=0e-3
+        dynamics,
+        controller,
+        lyapunov_nn,
+        kappa=kappa * 1e-2,
+        hard_max=hard_max,
+        box_lo=0,
+        box_up=0,
+        rho_multiplier=2.25,
     )
     fig, ax = plt.subplots(1, 2)
     # Check with pgd attack.
@@ -473,3 +438,102 @@ if __name__ == "__main__":
         plt.savefig(
             f"{data_folder}/V_{kappa}_{candidate_scale}_roa_{str(plot_idx)}.png"
         )
+
+    quadrotor_state_limits = tuple(
+        (lower_limit[i], upper_limit[i]) for i in range(len(lower_limit))
+    )
+
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=quadrotor_state_limits,
+        rho=rho,
+        device=device,
+    )
+
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+
+    labels = [r"$x$", r"$y$", r"$\theta$", r"$\dot x$", r"$\dot y$", r"$\dot \theta$"]
+
+    plot_indices = (
+        (2, 5),  # theta vs dot_theta
+        (0, 3),  # x vs dot_x
+        (1, 4),  # y vs dot_y
+        (0, 2),  # x vs theta
+        (1, 2),  # y vs theta
+        (0, 1),  # x vs y
+        (3, 4),  # dot_x vs dot_y
+        (4, 5),  # dot_y vs dot_theta
+        (3, 5),  # dot_x vs dot_theta
+    )
+
+    suffixes = (
+        "theta_v_dot_theta",
+        "x_v_dot_x",
+        "y_v_dot_y",
+        "x_v_theta",
+        "y_v_theta",
+        "x_v_y",
+        "dot_x_v_dot_y",
+        "dot_y_v_dot_theta",
+        "dot_x_v_dot_theta",
+    )
+
+    titles = (
+        "Angle and Angle Derivative",
+        "X and X Derivative",
+        "Y and Y Derivative",
+        "X and Angle",
+        "Y and Angle",
+        "X and Y",
+        "X Derivative and Y Derivative",
+        "Y Derivative and Angle Derivative",
+        "X Derivative and Angle Derivative",
+    )
+
+    for idx_index, plot_idxes in enumerate(plot_indices):
+
+        name_tuple = (labels[plot_idxes[0]], labels[plot_idxes[1]])
+
+        state_lims = (
+            quadrotor_state_limits[plot_idxes[0]],
+            quadrotor_state_limits[plot_idxes[1]],
+        )
+
+        lrv.plot_lyapunov_2d(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"2D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+        )
+
+        lrv.plot_lyapunov_3d_surface(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            nx=6,
+            title=f"3D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+            show_derivative=True,
+        )
+
+
+if __name__ == "__main__":
+    main()
