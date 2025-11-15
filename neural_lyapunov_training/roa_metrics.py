@@ -1112,5 +1112,5 @@ def print_roa_metrics(metrics: ROAMetrics, title: Optional[str] = None):
     print(f"\nROA threshold (ρ): {metrics.rho:.6f}")
     print(f"Domain area/volume: {metrics.area_domain:.6f}")
     print(f"ROA area/volume: {metrics.area_roa:.6f}")
-    print(f"Coverage ratio: {metrics.coverage_ratio*100:.2f}%")
+    print(f"Coverage ratio: {metrics.coverage_ratio*100:.6f}%")
     print(f"{'='*70}")
