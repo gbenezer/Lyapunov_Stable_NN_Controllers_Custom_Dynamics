@@ -126,7 +126,7 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
-    pendulum_continuous = ss.SymbolicPendulum2ndOrder(m=0.15, l=0.5, beta=0.1, g=9.81)
+    pendulum_continuous = ss.SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
     dynamics = sd.GenericDiscreteTimeSystem(
         pendulum_continuous,
         dt=dt,
