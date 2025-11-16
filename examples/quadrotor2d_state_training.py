@@ -116,11 +116,11 @@ def main(cfg: DictConfig):
         lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True) / 50
     )  # Scale V_lqr to be in [0, 10]
     u = lambda x: x @ K_torch.T + quadrotor_continuous.u_equilibrium.to(device)
-    controller_target = lambda x: torch.clamp(
-        u(x),
-        min=torch.tensor([0, 0.0], device=device),
-        max=dynamics.u_equilibrium.to(device) * 2.5,
-    )
+    # controller_target = lambda x: torch.clamp(
+    #     u(x),
+    #     min=torch.tensor([0, 0.0], device=device),
+    #     max=dynamics.u_equilibrium.to(device) * 2.5,
+    # )
 
     controller = controllers.NeuralNetworkController(
         nlayer=cfg.model.controller_nlayer,
