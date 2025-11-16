@@ -6,7 +6,7 @@ user:
   wandb_enabled: True
   wandb_entity: GB-Northeastern-Projects
   wandb_project: CS-7268-Group-Project
-  wandb_suffix: reproduce
+  wandb_suffix: reproduce_hard_coded
   wandb_name: pendulum_state_${user.wandb_suffix}
   load_lyaloss: null
   Vmin_x_pgd_path: null 
