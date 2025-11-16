@@ -292,6 +292,8 @@ def main(cfg: DictConfig):
             direction="minimize",
         )
 
+    lyapunov_nn.eval()
+    controller.eval()
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
         controller,
@@ -303,8 +305,6 @@ def main(cfg: DictConfig):
         hard_max=True,
     )
 
-    lyapunov_nn.eval()
-    controller.eval()
     pgd_verifier_find_counterexamples = False
     counterexamples_check = torch.zeros((0, 2), device=device)
     for seed in range(100):
@@ -404,7 +404,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("tracking_error", "heading_error"),
         rho=rho,
-        title="Lyapunov Function for First-Order Path Tracking System",
+        title="Lyapunov Function for First-Order Path Tracking System, Symbolic",
         save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
         show=False,
     )
@@ -418,7 +418,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("tracking_error", "heading_error"),
         rho=rho,
-        title="Lyapunov Function for First-Order Path Tracking System",
+        title="Lyapunov Function for First-Order Path Tracking System, Symbolic",
         save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
         show=False,
         show_derivative=True,

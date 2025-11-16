@@ -289,6 +289,8 @@ def main(cfg: DictConfig):
             direction="minimize",
         )
 
+    lyapunov_nn.eval()
+    controller.eval()
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
         controller,
@@ -299,9 +301,6 @@ def main(cfg: DictConfig):
         kappa=0.0,
         hard_max=True,
     )
-
-    lyapunov_nn.eval()
-    controller.eval()
     pgd_verifier_find_counterexamples = False
     counterexamples_check = torch.zeros((0, 2), device=device)
     for seed in range(100):
