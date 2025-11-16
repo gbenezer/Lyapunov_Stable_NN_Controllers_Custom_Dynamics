@@ -307,6 +307,13 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
     else:
         limit = cfg.model.limit_scale[-1] * torch.tensor(cfg.model.limit, device=device)
         lower_limit = -limit
