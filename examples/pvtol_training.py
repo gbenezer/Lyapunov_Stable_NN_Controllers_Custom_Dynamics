@@ -26,54 +26,6 @@ import neural_lyapunov_training.roa_metrics as rmet
 device = torch.device("cuda")
 dtype = torch.float
 
-
-# def approximate_lqr(pvtol,
-#                     controller: controllers.NeuralNetworkController,
-#                     lyapunov_nn: lyapunov.NeuralNetworkLyapunov):
-
-#     Q = np.diag(np.array([1, 1, 1, 10, 10, 10.]))
-#     R = np.diag(np.array([10, 10.]))
-#     K, S = pvtol.lqr_control(Q, R, pvtol.x_equilibrium,
-#                                  pvtol.u_equilibrium)
-#     K_torch = torch.from_numpy(K).type(dtype).to(device)
-#     S_torch = torch.from_numpy(S).type(dtype).to(device)
-
-#     # We will sample x during each training iteration.
-#     V = lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True)/50
-#     u = lambda x: x @ K_torch.T + pvtol.u_equilibrium.to(device)
-
-#     def approximate(system, target_func, lr, max_iter, l1_reg=1.0):
-#         optimizer = torch.optim.Adam(system.parameters(), lr=lr)
-#         scheduler = torch.optim.lr_scheduler.LinearLR(optimizer,
-#                                                       start_factor=1.0,
-#                                                       end_factor=0.0,
-#                                                       total_iters=max_iter)
-#         total_elements = sum(p.numel() for p in system.parameters())
-#         for i in range(max_iter):
-#             optimizer.zero_grad(set_to_none=True)
-#             # Sample x and compute target.
-#             x = (torch.rand((100000, 6), device=device) - 0.5) * limit
-#             y = target_func(x)
-#             output = torch.nn.MSELoss()(system(x), y)
-#             # Compute a L1 norm loss to encourage tighter IBP bounds.
-#             l1_loss = l1_reg * sum(
-#                 p.abs().sum() for p in system.parameters()) / total_elements
-#             loss = output + l1_loss
-#             loss.backward()
-#             print(
-#                 f"iter {i}, mse {output.item()}, l1 {l1_loss.item()}, loss {loss.item()}, lr {scheduler.get_last_lr()[0]:.5f}"
-#             )
-#             optimizer.step()
-#             scheduler.step()
-
-#     # TODO: tune L1 reg term.
-#     approximate(lyapunov_nn, V, lr=0.02, max_iter=5000, l1_reg=0.01)
-#     if len(
-#             list(controller.parameters())
-#     ) > 0:  # Do not train if there are no parameters (e.g., fixed linear controller).
-#         approximate(controller, u, lr=0.05, max_iter=500, l1_reg=0.01)
-
-
 def plot_V(V, lower_limit, upper_limit):
     x_ticks = torch.linspace(lower_limit[0], upper_limit[0], 50, device=device)
     y_ticks = torch.linspace(lower_limit[1], upper_limit[1], 50, device=device)
@@ -160,36 +112,6 @@ def plot_V_heatmap(
 
 
 if __name__ == "__main__":
-    # arguments.Config.add_argument(
-    #     "--approximate_lqr_lyaloss",
-    #     type=str,
-    #     default=None,
-    #     help=
-    #     "Approximate LQR controller/cost and store the approximation model to this path.",
-    #     hierarchy=["train", "approximate_lqr_lyaloss"])
-    arguments.Config.add_argument(
-        "--hard_max",
-        type=bool,
-        default=True,
-        help="Softmax or hard max for the max in derivative lyapunov loss and candidate roa regularizer.",
-        hierarchy=["train", "hard_max"],
-    )
-    arguments.Config.add_argument(
-        "--candidate_scale",
-        type=float,
-        default=2.0,
-        help="Scaling of al the vertices of the bounding box to be state-of-interest.",
-        hierarchy=["loss", "candidate_scale"],
-    )
-    arguments.Config.add_argument(
-        "--num_samples_per_boundary",
-        type=int,
-        default=500,
-        help="Number of samples on the boundary for obtaining V_min using pgd attack.",
-        hierarchy=["train", "num_samples_per_boundary"],
-    )
-
-    arguments.Config.parse_config()
     train_utils.set_seed(42)
 
     dt = 0.05
@@ -350,6 +272,8 @@ if __name__ == "__main__":
         lr_scheduler=False,
     )
 
+    controller.eval()
+    lyapunov_nn.eval()
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
         controller,
@@ -510,7 +434,7 @@ if __name__ == "__main__":
             state_names=name_tuple,
             state_indices=plot_idxes,
             rho=rho,
-            title=f"2D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            title=f"2D Lyapunov Function, 2D PVTOL, State Feedback, {titles[idx_index]}",
             save_html=os.path.join(
                 os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
             ),
@@ -526,7 +450,7 @@ if __name__ == "__main__":
             state_indices=plot_idxes,
             rho=rho,
             nx=6,
-            title=f"3D Lyapunov Function, 2D Quadrotor, State Feedback, {titles[idx_index]}",
+            title=f"3D Lyapunov Function, 2D PVTOL, State Feedback, {titles[idx_index]}",
             save_html=os.path.join(
                 os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
             ),
