@@ -141,7 +141,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    # controller.eval()
+    controller.train()
 
     absolute_output = True
     R = torch.linalg.cholesky(S_torch)
@@ -152,7 +152,7 @@ def main(cfg: DictConfig):
         eps=0.01,
         R=R,
     )
-
+    lyapunov_nn.train()
     dynamics.to(device).to(dtype)
     controller.to(device).to(dtype)
     lyapunov_nn.to(device).to(dtype)
@@ -309,11 +309,20 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
     else:
         limit = cfg.model.limit_scale[-1] * limit_x
         lower_limit = -limit
         upper_limit = limit
 
+    controller.eval()
+    lyapunov_nn.eval()
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
         controller,
