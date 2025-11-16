@@ -122,11 +122,11 @@ def main(cfg: DictConfig):
         lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True) / 50
     )  # Scale V_lqr to be in [0, 10]
     u = lambda x: x @ K_torch.T + quadrotor_continuous.u_equilibrium.to(device)
-    controller_target = lambda x: torch.clamp(
-        u(x),
-        min=torch.tensor([0, 0.0], device=device),
-        max=dynamics.u_equilibrium.to(device) * 2.5,
-    )
+    # controller_target = lambda x: torch.clamp(
+    #     u(x),
+    #     min=torch.tensor([0, 0.0], device=device),
+    #     max=dynamics.u_equilibrium.to(device) * 2.5,
+    # )
 
     controller = controllers.NeuralNetworkController(
         nlayer=cfg.model.controller_nlayer,
@@ -147,7 +147,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    controller.eval()
+    controller.train()
 
     absolute_output = True
     R = torch.linalg.cholesky(S_torch)
@@ -158,7 +158,7 @@ def main(cfg: DictConfig):
         eps=0.01,
         R=R,
     )
-
+    lyapunov_nn.train()
     dynamics.to(device).to(dtype)
     controller.to(device).to(dtype)
     lyapunov_nn.to(device).to(dtype)
@@ -327,6 +327,8 @@ def main(cfg: DictConfig):
         lower_limit = -limit
         upper_limit = limit
 
+    lyapunov_nn.eval()
+    controller.eval()
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeLoss(
         dynamics,
         controller,
