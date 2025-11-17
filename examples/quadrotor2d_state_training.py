@@ -115,7 +115,7 @@ def main(cfg: DictConfig):
     V = (
         lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True) / 50
     )  # Scale V_lqr to be in [0, 10]
-    u = lambda x: x @ K_torch.T + quadrotor_continuous.u_equilibrium.to(device)
+    # u = lambda x: x @ K_torch.T + quadrotor_continuous.u_equilibrium.to(device)
     # controller_target = lambda x: torch.clamp(
     #     u(x),
     #     min=torch.tensor([0, 0.0], device=device),
@@ -459,7 +459,7 @@ def main(cfg: DictConfig):
         "y_v_theta",
         "x_v_y",
         "dot_x_v_dot_y",
-        "dot_y_v_dot_theta", 
+        "dot_y_v_dot_theta",
         "dot_x_v_dot_theta",
     )
 
