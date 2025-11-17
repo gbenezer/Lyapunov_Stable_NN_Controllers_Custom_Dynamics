@@ -1,7 +1,7 @@
 import os
 from path import Path
 import pdb
-from datetime.datetime import now
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import wandb
 import itertools
+import logging
 
 import neural_lyapunov_training.arguments as arguments
 import neural_lyapunov_training.controllers as controllers
@@ -25,6 +26,7 @@ import neural_lyapunov_training.roa_metrics as rmet
 
 device = torch.device("cuda")
 dtype = torch.float
+
 
 def plot_V(V, lower_limit, upper_limit):
     x_ticks = torch.linspace(lower_limit[0], upper_limit[0], 50, device=device)
@@ -112,8 +114,9 @@ def plot_V_heatmap(
 
 
 if __name__ == "__main__":
-    train_utils.set_seed(42)
 
+    train_utils.set_seed(42)
+    logger = logging.getLogger(__name__)
     dt = 0.05
     pvtol_continuous = ss.PVTOL()
     dynamics = sd.GenericDiscreteTimeSystem(
@@ -123,15 +126,6 @@ if __name__ == "__main__":
         position_integration=sd.IntegrationMethod.RK4,
     )
 
-    limit_scale = 1.0
-    limit = limit_scale * torch.tensor(
-        [0.75, 0.75, np.pi / 2, 4, 4, 3], dtype=dtype, device=device
-    )
-    # limit = limit_scale * torch.tensor(
-    #     [1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=dtype, device=device
-    # )
-    lower_limit = -limit
-    upper_limit = limit
     grid_size = torch.tensor([4, 4, 6, 5, 5, 6], device=device)
 
     Q = np.diag(np.array([1, 1, 1, 10, 10, 10.0]))
@@ -142,7 +136,7 @@ if __name__ == "__main__":
     max_u = torch.tensor([1, 1.0], device=device) * 39.2
 
     controller = controllers.NeuralNetworkController(
-        nlayer=2,
+        nlayer=4,
         in_dim=6,
         out_dim=2,
         hidden_dim=8,
@@ -155,15 +149,23 @@ if __name__ == "__main__":
     controller.train()
 
     absolute_output = True
-    lyapunov_nn = lyapunov.NeuralNetworkLyapunov(
+    # lyapunov_nn = lyapunov.NeuralNetworkLyapunov(
+    #     goal_state=torch.zeros(6, dtype=dtype).to(device),
+    #     hidden_widths=[16, 16, 8],
+    #     x_dim=6,
+    #     R_rows=3,
+    #     absolute_output=absolute_output,
+    #     eps=0.01,
+    #     activation=nn.LeakyReLU,
+    #     V_psd_form="L1",
+    # )
+    R = torch.linalg.cholesky(S_torch)
+    lyapunov_nn = lyapunov.NeuralNetworkQuadraticLyapunov(
         goal_state=torch.zeros(6, dtype=dtype).to(device),
-        hidden_widths=[16, 16, 8],
         x_dim=6,
-        R_rows=3,
-        absolute_output=absolute_output,
+        R_rows=6,
         eps=0.01,
-        activation=nn.LeakyReLU,
-        V_psd_form="L1",
+        R=R,
     )
     lyapunov_nn.train()
 
@@ -200,7 +202,8 @@ if __name__ == "__main__":
 
     candidate_scale = 2.0
     candidate_roa_states_weight = 1.0e-05
-    data_folder = f"./output/benezerg/pvtol_state/{now():%Y-%m-%d}/{now():%H-%M-%S}"
+    suffix = "symbolic"
+    data_folder = f"./output/benezerg/pvtol_state/{datetime.now():%Y-%m-%d}/{datetime.now():%H-%M-%S}_{suffix}"
     os.makedirs(data_folder, exist_ok=True)
     save_lyaloss = True
     V_decrease_within_roa = True
@@ -214,63 +217,75 @@ if __name__ == "__main__":
     wandb.init(
         project="CS-7268-Group-Project",
         entity="GB-Northeastern-Projects",
-        name=f"{now():%Y-%m-%d}_{now():%H-%M-%S}_pvtol_state",
+        name=f"{datetime.now():%Y-%m-%d}_{datetime.now():%H-%M-%S}_pvtol_state",
     )
 
     permute_array = [[-1, 1]] * pvtol_continuous.nx
     permute_array_torch = torch.tensor(
         list(itertools.product(*permute_array)), device=device
     )
-    candidate_roa_states = permute_array_torch * upper_limit
-    x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
-        lyapunov_nn,
-        lower_limit,
-        upper_limit,
-        num_samples_per_boundary=1000,
-        eps=limit,
-        steps=100,
-        direction="minimize",
+
+    limit_base = torch.tensor(
+        [0.3, 0.3, 0.3, 1.0, 1.0, 1.0], dtype=dtype, device=device
     )
-    rho = lyapunov_nn(x_min_boundary).min().item()
-    # Sample slightly outside the current ROA
-    V_candidate = lyapunov_nn(candidate_roa_states).clone().detach()
-    candidate_roa_states = (
-        candidate_roa_states / torch.sqrt(V_candidate / rho) * candidate_scale
-    )
-    candidate_roa_states = torch.clamp(
-        candidate_roa_states, min=lower_limit, max=upper_limit
-    )
-    train_utils.train_lyapunov_with_buffer(
-        derivative_lyaloss=derivative_lyaloss,
-        positivity_lyaloss=positivity_lyaloss,
-        observer_loss=None,
-        lower_limit=lower_limit,
-        upper_limit=upper_limit,
-        grid_size=grid_size,
-        learning_rate=0.001,
-        weight_decay=0.0,
-        max_iter=150,
-        enable_wandb=True,
-        derivative_ibp_ratio=0,
-        derivative_sample_ratio=1,
-        positivity_ibp_ratio=0,
-        positivity_sample_ratio=0,
-        save_best_model=save_lyaloss_path,
-        pgd_steps=150,
-        buffer_size=131072,
-        batch_size=1024,
-        epochs=100,
-        samples_per_iter=16384,
-        l1_reg=0,
-        num_samples_per_boundary=1024,
-        V_decrease_within_roa=V_decrease_within_roa,
-        Vmin_x_boundary_weight=0,
-        Vmax_x_boundary_weight=0,
-        candidate_roa_states=candidate_roa_states,
-        candidate_roa_states_weight=1.0e-05,
-        hard_max=hard_max,
-        lr_scheduler=False,
-    )
+    limit_scale = [0.25, 0.5, 1.0, 2.0]
+    for scale in limit_scale:
+        limit = limit_scale * limit_base
+        lower_limit = -1 * limit
+        upper_limit = 1 * limit
+
+        
+        candidate_roa_states = permute_array_torch * upper_limit
+        x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
+            lyapunov_nn,
+            lower_limit,
+            upper_limit,
+            num_samples_per_boundary=1000,
+            eps=limit,
+            steps=100,
+            direction="minimize",
+        )
+        rho = lyapunov_nn(x_min_boundary).min().item()
+        # Sample slightly outside the current ROA
+        V_candidate = lyapunov_nn(candidate_roa_states).clone().detach()
+        candidate_roa_states = (
+            candidate_roa_states / torch.sqrt(V_candidate / rho) * candidate_scale
+        )
+        candidate_roa_states = torch.clamp(
+            candidate_roa_states, min=lower_limit, max=upper_limit
+        )
+        train_utils.train_lyapunov_with_buffer(
+            derivative_lyaloss=derivative_lyaloss,
+            positivity_lyaloss=positivity_lyaloss,
+            observer_loss=None,
+            lower_limit=lower_limit,
+            upper_limit=upper_limit,
+            grid_size=grid_size,
+            learning_rate=0.0005,
+            weight_decay=0.0,
+            max_iter=200,
+            enable_wandb=True,
+            derivative_ibp_ratio=0,
+            derivative_sample_ratio=1,
+            positivity_ibp_ratio=0,
+            positivity_sample_ratio=0,
+            save_best_model=save_lyaloss_path,
+            pgd_steps=150,
+            buffer_size=131072,
+            batch_size=1024,
+            epochs=200,
+            samples_per_iter=8192,
+            l1_reg=0,
+            num_samples_per_boundary=1024,
+            V_decrease_within_roa=V_decrease_within_roa,
+            Vmin_x_boundary_weight=0,
+            Vmax_x_boundary_weight=0,
+            candidate_roa_states=candidate_roa_states,
+            candidate_roa_states_weight=1.0e-05,
+            hard_max=hard_max,
+            lr_scheduler=False,
+            logger=logger,
+        )
 
     controller.eval()
     lyapunov_nn.eval()
@@ -278,7 +293,7 @@ if __name__ == "__main__":
         dynamics,
         controller,
         lyapunov_nn,
-        kappa=kappa * 1e-2,
+        kappa=0.0,
         hard_max=hard_max,
         box_lo=0,
         box_up=0,
@@ -286,6 +301,7 @@ if __name__ == "__main__":
     )
     fig, ax = plt.subplots(1, 2)
     # Check with pgd attack.
+    pgd_verifier_find_counterexamples = False
     for seed in range(200, 300):
         train_utils.set_seed(seed)
         if V_decrease_within_roa:
@@ -320,6 +336,12 @@ if __name__ == "__main__":
         print(msg)
         x_adv = adv_x[(adv_lya < 0).squeeze()]
         print(adv_lya.min().item())
+        if max_adv_violation > 0:
+            pgd_verifier_find_counterexamples = True
+        logger.info(msg)
+    logger.info(
+        f"PGD verifier finds counter examples? {pgd_verifier_find_counterexamples}"
+    )
 
     plt.clf()
     rho = lyapunov_nn(x_min_boundary).min().item()
@@ -436,7 +458,7 @@ if __name__ == "__main__":
             rho=rho,
             title=f"2D Lyapunov Function, 2D PVTOL, State Feedback, {titles[idx_index]}",
             save_html=os.path.join(
-                os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
+                data_folder, f"lyapunov_2d_{suffixes[idx_index]}.html"
             ),
             show=False,
         )
@@ -452,12 +474,8 @@ if __name__ == "__main__":
             nx=6,
             title=f"3D Lyapunov Function, 2D PVTOL, State Feedback, {titles[idx_index]}",
             save_html=os.path.join(
-                os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
+                data_folder, f"lyapunov_3d_{suffixes[idx_index]}.html"
             ),
             show=False,
             show_derivative=True,
         )
-
-
-if __name__ == "__main__":
-    main()
