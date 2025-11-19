@@ -11,4 +11,4 @@
 #SBATCH --error=output/fanghsinli/quadrotor2d_output/job_logs/quadrotor2d_output_v100-sxm2_train_controller.%j.err
 
 export PYTHONPATH="${PYTHONPATH}:$(pwd):$(pwd)/alpha-beta-CROWN:$(pwd)/alpha-beta-CROWN/complete_verifier"
-python examples/quadrotor2d_output_training.py user=fanghsinli_quadrotor2d_output_training_sxm2
+python examples/quadrotor2d_output_training_symbolic.py user=fanghsinli_quadrotor2d_output_training_symbolic_sxm2
