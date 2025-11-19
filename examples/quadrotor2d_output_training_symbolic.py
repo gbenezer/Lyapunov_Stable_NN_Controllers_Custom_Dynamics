@@ -31,7 +31,7 @@ def main(cfg: DictConfig):
     train_utils.set_seed(cfg.seed)
 
     quadrotor_continuous = ss.SymbolicQuadrotor2D()
-    dt = cfg.model.dt
+    dt = 0.01
     dynamics = sd.GenericDiscreteTimeSystem(
         quadrotor_continuous, 
         dt, 
