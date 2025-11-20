@@ -30,7 +30,7 @@ def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
     train_utils.set_seed(cfg.seed)
 
-    quadrotor_continuous = ss.SymbolicQuadrotor2D()
+    quadrotor_continuous = ss.SymbolicQuadrotor2DOutput()
     dt = 0.01
     dynamics = sd.GenericDiscreteTimeSystem(
         quadrotor_continuous, 
@@ -100,7 +100,10 @@ def main(cfg: DictConfig):
     )
     observer.eval()
 
-    K, S = quadrotor_continuous.lqr_control()
+
+    Q = np.diag(np.array([10, 20, 5, 5]))
+    R = np.diag(np.array([1, 1]))
+    K, S = quadrotor_continuous.lqr_control(Q, R)
     K_torch = torch.from_numpy(K).type(dtype).to(device)
     S_torch = torch.from_numpy(S).type(dtype).to(device)
 
