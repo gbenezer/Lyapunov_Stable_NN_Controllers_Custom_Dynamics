@@ -104,7 +104,9 @@ def main(cfg: DictConfig):
     )
     observer.train()
 
-    K, S = pt.compute_lqr(pendulum_continuous)
+    Q = np.eye(2)
+    R = np.eye(1) * 100
+    K, S = pendulum_continuous.lqr_control(Q=Q, R=R)
     K_torch = torch.from_numpy(K).type(dtype).to(device)
     S_torch = torch.from_numpy(S).type(dtype).to(device)
     V_lqr = lambda x: torch.sum(x * (x @ S_torch), axis=1, keepdim=True)

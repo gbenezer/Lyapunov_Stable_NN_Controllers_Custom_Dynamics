@@ -11,6 +11,8 @@ import neural_lyapunov_training.lyapunov as lyapunov
 import neural_lyapunov_training.controllers as controllers
 import neural_lyapunov_training.pendulum as pendulum
 import neural_lyapunov_training.output_train_utils as output_train_utils
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
 import itertools
 import pendulum_state_training as pt
 
@@ -445,6 +447,54 @@ def main(cfg: DictConfig):
             # )
             plt.plot(e_traj[:, :, 0], e_traj[:, :, 1], linewidth=2)
         plt.savefig(os.path.join(os.getcwd(), f"V_{kappa}_{str(plot_idx)}.png"))
+
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        rho=rho,
+        device=device,
+    )
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+
+    lrv.plot_lyapunov_2d(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        observer_nn=observer,
+        dynamics_system=dynamics,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("theta", "theta_dot"),
+        rho=rho,
+        title="Lyapunov Function for Inverted Pendulum System, Output Feedback",
+        save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
+        show=False,
+    )
+    lrv.plot_lyapunov_3d_surface(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_system=dynamics,
+        observer_nn=observer,
+        state_limits=(
+            (lower_limit[0], upper_limit[0]),
+            (lower_limit[1], upper_limit[1]),
+        ),
+        state_names=("theta", "theta_dot"),
+        rho=rho,
+        title="Lyapunov Function for Inverted Pendulum System, Output Feedback",
+        save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
+        show=False,
+        show_derivative=True,
+    )
+
+    pass
 
 
 if __name__ == "__main__":
