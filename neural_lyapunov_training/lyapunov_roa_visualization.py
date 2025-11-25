@@ -266,6 +266,11 @@ def _compute_lyapunov_derivative(
                 if hasattr(controller_nn, "net")
                 else None
             )
+
+            print(f"z_estimate shape: {z_estimate.shape}")
+            print(f"y shape: {y.shape}")
+            print(f"Controller expects: {controller_in_dim}")
+            
             if controller_in_dim is None:
                 # Try to infer from x_equilibrium
                 if hasattr(controller_nn, "x_equilibrium"):
