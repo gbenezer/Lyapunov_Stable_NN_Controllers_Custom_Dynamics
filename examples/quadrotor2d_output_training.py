@@ -65,7 +65,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    controller.eval()
+    controller.train()
 
     # Reference EKF observer
     ekf_observer = controllers.EKFObserver(
@@ -88,7 +88,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    observer.eval()
+    observer.train()
 
     K, S = quadrotor_continuous.lqr_control()
     K_torch = torch.from_numpy(K).type(dtype).to(device)
@@ -127,6 +127,7 @@ def main(cfg: DictConfig):
         R=R,
     )
     lyapunov_nn.to(device)
+    lyapunov_nn.train()
 
     kappa = cfg.model.kappa
     hard_max = cfg.train.hard_max
@@ -236,6 +237,23 @@ def main(cfg: DictConfig):
         },
         os.path.join(os.getcwd(), "lyapunov_nn.pth"),
     )
+    torch.save(
+        {
+            "state_dict": controller.state_dict(),
+            "rho": derivative_lyaloss.get_rho(),
+        },
+        os.path.join(os.getcwd(), "controller_nn.pth"),
+    )
+    torch.save(
+        {
+            "state_dict": observer.state_dict(),
+            "rho": derivative_lyaloss.get_rho(),
+        },
+        os.path.join(os.getcwd(), "observer_nn.pth"),
+    )
+    controller.eval()
+    observer.eval()
+    lyapunov_nn.eval()
 
     # "Verify" Lyapunov conditions with PGD attack
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeDOFLoss(
