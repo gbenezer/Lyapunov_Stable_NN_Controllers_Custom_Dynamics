@@ -13,6 +13,9 @@ import neural_lyapunov_training.controllers as controllers
 import neural_lyapunov_training.quadrotor2d as quadrotor2d
 import neural_lyapunov_training.train_utils as train_utils
 
+import neural_lyapunov_training.lyapunov_roa_visualization as lrv
+import neural_lyapunov_training.roa_metrics as rmet
+
 import wandb
 import os
 
