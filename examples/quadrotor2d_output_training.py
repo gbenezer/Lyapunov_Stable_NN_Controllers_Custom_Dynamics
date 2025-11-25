@@ -402,6 +402,87 @@ def main(cfg: DictConfig):
             )
         )
 
+    quadrotor_state_limits = tuple(
+        (lower_limit[i], upper_limit[i]) for i in range(len(lower_limit))
+    )
+
+    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        state_limits=quadrotor_state_limits,
+        rho=rho,
+        device=device,
+    )
+
+    rmet.print_roa_metrics(
+        computed_roa_metrics,
+        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    )
+
+    labels = [r"$y$", r"$\theta$", r"$\dot y$", r"$\dot \theta$"]
+
+    plot_indices = (
+        (0, 1),  # y vs theta
+        (0, 2),  # y vs dot_y
+        (1, 3),  # theta vs dot_theta
+        (2, 3),  # dot_y vs_dot_theta
+    )
+
+    suffixes = (
+        "y_v_theta",
+        "y_v_dot_y",
+        "theta_v_dot_theta",
+        "dot_y_v_dot_theta",
+    )
+
+    titles = (
+        "Y and Angle",
+        "Y and Y Derivative",
+        "Angle and Angle Derivative",
+        "Y Derivative and Angle Derivative",
+    )
+
+    for idx_index, plot_idxes in enumerate(plot_indices):
+
+        name_tuple = (labels[plot_idxes[0]], labels[plot_idxes[1]])
+
+        state_lims = (
+            quadrotor_state_limits[plot_idxes[0]],
+            quadrotor_state_limits[plot_idxes[1]],
+        )
+
+        lrv.plot_lyapunov_2d(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            observer_nn=observer,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"2D Lyapunov Function, Hard Coded 2D Quadrotor, Output LIDAR Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+        )
+
+        lrv.plot_lyapunov_3d_surface(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            observer_nn=observer,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"3D Lyapunov Function, Hard Coded 2D Quadrotor, Output LIDAR Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+            show_derivative=True,
+        )
+
 
 if __name__ == "__main__":
     main()
