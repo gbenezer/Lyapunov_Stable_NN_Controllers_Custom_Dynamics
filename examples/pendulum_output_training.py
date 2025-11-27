@@ -28,7 +28,7 @@ dtype = torch.float
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
 
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
     grid_size = torch.tensor([10, 10, 5, 5], device=device)
 
@@ -279,6 +279,20 @@ def main(cfg: DictConfig):
             },
             os.path.join(os.getcwd(), "lyapunov_nn.pth"),
         )
+        torch.save(
+            {
+                "state_dict": controller.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "controller_nn.pth"),
+        )
+        torch.save(
+            {
+                "state_dict": observer.state_dict(),
+                "rho": derivative_lyaloss.get_rho(),
+            },
+            os.path.join(os.getcwd(), "observer_nn.pth"),
+        )
     else:
         limit = limit_xe * cfg.model.limit_scale[-1]
         lower_limit = -limit
@@ -298,7 +312,7 @@ def main(cfg: DictConfig):
         hard_max=True,
     )
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
