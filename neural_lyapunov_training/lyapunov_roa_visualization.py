@@ -359,6 +359,7 @@ def plot_lyapunov_2d(
     show: bool = True,
     colorscale: str = "Viridis",
     estimation_error: Optional[torch.Tensor] = None,
+    trajectory_colorscale: str = "Plotly",
 ):
     """
     Plot Lyapunov function value field and Region of Attraction in 2D
@@ -384,6 +385,8 @@ def plot_lyapunov_2d(
         colorscale: Plotly colorscale name
         estimation_error: Optional fixed estimation error for visualization
                          (default: zeros, meaning perfect state estimation)
+        trajectory_colorscale: Plotly qualitative color sequence for trajectories
+                              (e.g., "Plotly", "D3", "Vivid", "Dark24", "Set1")
 
     Returns:
         Plotly figure object
@@ -551,10 +554,18 @@ def plot_lyapunov_2d(
 
     # Overlay trajectories if provided
     if trajectories is not None:
-        colors = ["white", "yellow", "cyan", "magenta", "orange"]
+        import plotly.express as px
+        
+        # Get the color sequence
+        try:
+            color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
+        except AttributeError:
+            print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+            color_sequence = px.colors.qualitative.Plotly
+        
         for i, traj in enumerate(trajectories):
             traj_np = traj.detach().cpu().numpy()
-            color = colors[i % len(colors)]
+            color = color_sequence[i % len(color_sequence)]
 
             for col in [1, 2]:
                 # Trajectory line
@@ -651,9 +662,11 @@ def plot_lyapunov_3d_surface(
     colorscale: str = "Viridis",
     show_derivative: bool = False,
     estimation_error: Optional[torch.Tensor] = None,
+    trajectories: Optional[List[torch.Tensor]] = None,
+    trajectory_colorscale: str = "Plotly",
 ):
     """
-    Plot Lyapunov function as a 3D surface, optionally with derivative surface
+    Plot Lyapunov function as a 3D surface, optionally with derivative surface and trajectories
 
     Automatically handles both state feedback and output feedback (observer-based) systems.
 
@@ -673,6 +686,9 @@ def plot_lyapunov_3d_surface(
         colorscale: Plotly colorscale
         show_derivative: If True, create side-by-side plot with V and ΔV
         estimation_error: Optional fixed estimation error for visualization
+        trajectories: Optional list of trajectories (timesteps, state_dim) to overlay
+        trajectory_colorscale: Plotly qualitative color sequence for trajectories
+                              (e.g., "Plotly", "D3", "Vivid", "Dark24", "Set1")
 
     Returns:
         Plotly figure
@@ -730,8 +746,7 @@ def plot_lyapunov_3d_surface(
         )
         V_dot_grid = V_dot.reshape(grid_resolution, grid_resolution).cpu().numpy()
 
-    # Get equilibrium info (used in multiple places)
-    # Use physical system's equilibrium
+    # Get equilibrium info
     if hasattr(dynamics_system, "continuous_time_system"):
         x_equilibrium = dynamics_system.continuous_time_system.x_equilibrium.to(device)
     else:
@@ -741,7 +756,6 @@ def plot_lyapunov_3d_surface(
 
     # Compute V at equilibrium for plotting
     if observer_nn is not None:
-        # For output feedback, Lyapunov expects [x, e] where e=0 at equilibrium
         eq_error = torch.zeros_like(x_equilibrium)
         eq_lyap_input = torch.cat([x_equilibrium, eq_error], dim=0).unsqueeze(0)
     else:
@@ -846,6 +860,109 @@ def plot_lyapunov_3d_surface(
                 col=col,
             )
 
+        # Add trajectories to both plots
+        if trajectories is not None:
+            import plotly.express as px
+            
+            # Get the color sequence
+            try:
+                color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
+            except AttributeError:
+                print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+                color_sequence = px.colors.qualitative.Plotly
+            
+            for i, traj in enumerate(trajectories):
+                traj_np = traj.detach().cpu().numpy()
+                color = color_sequence[i % len(color_sequence)]
+                
+                # Compute V and ΔV along trajectory
+                with torch.no_grad():
+                    # Prepare trajectory states for Lyapunov evaluation
+                    traj_physical = traj[:, :x_equilibrium.shape[0]]  # Extract physical states
+                    
+                    if observer_nn is not None:
+                        # For output feedback, augment with zero estimation error
+                        traj_error = torch.zeros_like(traj_physical)
+                        traj_lyap = torch.cat([traj_physical, traj_error], dim=1)
+                    else:
+                        traj_lyap = traj_physical
+                    
+                    # Compute V along trajectory
+                    V_traj = lyapunov_nn(traj_lyap).squeeze().cpu().numpy()
+                    
+                    # Compute ΔV along trajectory
+                    V_traj_deriv, V_dot_traj = _compute_lyapunov_derivative(
+                        traj_physical,
+                        lyapunov_nn,
+                        controller_nn,
+                        observer_nn,
+                        dynamics_system,
+                        device,
+                        None if observer_nn is None else torch.zeros((traj_physical.shape[0], x_equilibrium.shape[0]), device=device),
+                    )
+                    V_dot_traj_np = V_dot_traj.cpu().numpy()
+                
+                # Add trajectory to V(x) plot
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=traj_np[:, idx0],
+                        y=traj_np[:, idx1],
+                        z=V_traj,
+                        mode="lines",
+                        line=dict(color=color, width=4),
+                        name=f"Trajectory {i+1}",
+                        showlegend=True,
+                        hovertemplate=f"Traj {i+1}<br>V: %{{z:.3f}}<extra></extra>",
+                    ),
+                    row=1,
+                    col=1,
+                )
+                
+                # Start point on V(x)
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=[traj_np[0, idx0]],
+                        y=[traj_np[0, idx1]],
+                        z=[V_traj[0]],
+                        mode="markers",
+                        marker=dict(size=6, color=color, symbol="circle"),
+                        showlegend=False,
+                        hovertemplate="Start<extra></extra>",
+                    ),
+                    row=1,
+                    col=1,
+                )
+                
+                # Add trajectory to ΔV(x) plot
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=traj_np[:, idx0],
+                        y=traj_np[:, idx1],
+                        z=V_dot_traj_np,
+                        mode="lines",
+                        line=dict(color=color, width=4),
+                        showlegend=False,
+                        hovertemplate=f"Traj {i+1}<br>ΔV: %{{z:.3f}}<extra></extra>",
+                    ),
+                    row=1,
+                    col=2,
+                )
+                
+                # Start point on ΔV(x)
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=[traj_np[0, idx0]],
+                        y=[traj_np[0, idx1]],
+                        z=[V_dot_traj_np[0]],
+                        mode="markers",
+                        marker=dict(size=6, color=color, symbol="circle"),
+                        showlegend=False,
+                        hovertemplate="Start<extra></extra>",
+                    ),
+                    row=1,
+                    col=2,
+                )
+
         # Update scene settings for both plots
         if state_names is None:
             state_names = (f"x{idx0}", f"x{idx1}")
@@ -873,6 +990,7 @@ def plot_lyapunov_3d_surface(
             showlegend=True,
             margin=dict(l=50, r=50, t=80, b=50),
         )
+        
     else:
         # Single plot - just V(x)
         fig = go.Figure()
@@ -924,6 +1042,59 @@ def plot_lyapunov_3d_surface(
             )
         )
 
+        # Add trajectories to single plot
+        if trajectories is not None:
+            import plotly.express as px
+            
+            # Get the color sequence
+            try:
+                color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
+            except AttributeError:
+                print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+                color_sequence = px.colors.qualitative.Plotly
+            
+            for i, traj in enumerate(trajectories):
+                traj_np = traj.detach().cpu().numpy()
+                color = color_sequence[i % len(color_sequence)]
+                
+                # Compute V along trajectory
+                with torch.no_grad():
+                    traj_physical = traj[:, :x_equilibrium.shape[0]]
+                    
+                    if observer_nn is not None:
+                        traj_error = torch.zeros_like(traj_physical)
+                        traj_lyap = torch.cat([traj_physical, traj_error], dim=1)
+                    else:
+                        traj_lyap = traj_physical
+                    
+                    V_traj = lyapunov_nn(traj_lyap).squeeze().cpu().numpy()
+                
+                # Trajectory line
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=traj_np[:, idx0],
+                        y=traj_np[:, idx1],
+                        z=V_traj,
+                        mode="lines",
+                        line=dict(color=color, width=4),
+                        name=f"Trajectory {i+1}",
+                        hovertemplate=f"Traj {i+1}<br>V: %{{z:.3f}}<extra></extra>",
+                    )
+                )
+                
+                # Start point
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=[traj_np[0, idx0]],
+                        y=[traj_np[0, idx1]],
+                        z=[V_traj[0]],
+                        mode="markers",
+                        marker=dict(size=6, color=color, symbol="circle"),
+                        showlegend=False,
+                        hovertemplate="Start<extra></extra>",
+                    )
+                )
+
         # Set axis labels
         if state_names is None:
             state_names = (f"x{idx0}", f"x{idx1}")
@@ -948,7 +1119,6 @@ def plot_lyapunov_3d_surface(
             margin=dict(l=50, r=50, t=80, b=50),
         )
 
-    # Common legend settings (applied to both branches)
     fig.update_layout(
         legend=dict(
             x=1.14,
