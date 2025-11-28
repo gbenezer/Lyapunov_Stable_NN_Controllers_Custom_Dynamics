@@ -446,6 +446,200 @@ class SymbolicQuadrotor2DOutput(SymbolicDynamicalSystem):
         """For backward compatibility"""
         return self.gravity_val
 
+class SymbolicQuadrotor2DLidar(SymbolicDynamicalSystem):
+    """
+    Symbolic representation of a planar (2D) quadrotor with lidar-based partial observations.
+
+    Models a quadrotor constrained to move in the y-z plane with dynamics derived from
+    first principles. The system has 4 states (vertical position, pitch angle, and their
+    derivatives) and 2 control inputs (thrust from each rotor). Unlike full-state feedback,
+    this system uses a lidar sensor that measures distances to the ground at 4 different
+    angles, providing partial observability that requires state estimation (e.g., Kalman
+    filtering) for control. This implementation uses symbolic computation via SymPy to
+    enable automatic Jacobian derivation for neural Lyapunov control synthesis.
+
+    Based on the Stanford ASL neural-network-lyapunov quadrotor2d example:
+    https://github.com/StanfordASL/neural-network-lyapunov/blob/master/neural_network_lyapunov/examples/quadrotor2d/quadrotor_2d.py
+
+    State Vector (nx=4):
+        - y: vertical position [m]
+        - theta: pitch angle [rad]
+        - y_dot: vertical velocity [m/s]
+        - theta_dot: angular velocity [rad/s]
+
+    Control Inputs (nu=2):
+        - u1: thrust from rotor 1 [N]
+        - u2: thrust from rotor 2 [N]
+
+    Output Vector (ny=4):
+        - Lidar ray distances at 4 different angles [m]
+        - Measured from quadrotor to ground, ranging from [0, H]
+        - Angles span from theta - angle_max to theta + angle_max
+
+    Dynamics:
+        The system is second-order, so forward() returns accelerations:
+        - dy_dot = (1/m) * cos(theta) * (u1 + u2) - g - b * y_dot
+        - dtheta_dot = (L/I) * (u1 - u2) - b * theta_dot
+
+        where b is an optional damping coefficient (default: 0).
+
+    Observation Model:
+        Lidar rays measure distance to ground at different angles:
+        - phi_i = theta - angle_offset_i
+        - ray_i = (y + origin_height) / cos(phi_i)
+        - Clamped to [0, H] and masked when out of valid range
+
+    Equilibrium:
+        - State: [0, 0, 0, 0] (hovering at origin)
+        - Control: [mg/2, mg/2] (equal thrust counteracting gravity)
+        - Output: Lidar readings at equilibrium depend on ray angles. Center rays
+          measure approximately origin_height, while angled rays measure slightly
+          longer distances (e.g., ~1.12m for rays at ±26.8° when origin_height=1.0)
+
+    Parameters:
+        length: Distance from center of mass to rotor [m]. Default: 0.25
+        mass: Total quadrotor mass [kg]. Default: 0.486
+        inertia: Moment of inertia about pitch axis [kg⋅m²]. Default: 0.00383
+        gravity: Gravitational acceleration [m/s²]. Default: 9.81
+        b: Damping coefficient for both translational and angular velocities. Default: 0.0
+        H: Maximum lidar range [m]. Default: 5.0
+        angle_max: Maximum angle offset for lidar rays [rad]. Default: 0.149π
+        origin_height: Height offset added to vertical position [m]. Default: 1.0
+
+
+    Note:
+        This symbolic implementation is compatible with the hardcoded Quadrotor2DLidarDynamics
+        class when using matching parameters. The observation function h(x) uses smooth
+        approximations (via tanh and smooth_clamp) instead of hard thresholding to maintain
+        differentiability for automatic Jacobian computation.
+    """
+
+    def __init__(
+        self,
+        length: float = 0.25,
+        mass: float = 0.486,
+        inertia: float = 0.00383,
+        gravity: float = 9.81,
+        b: float = 0.0,
+        H: float = 5.0,
+        angle_max: float = 0.149 * np.pi,
+        origin_height: float = 1.0,
+    ):
+        super().__init__()
+        self.order = 2
+        # Store values for backward compatibility
+        self.length_val = length
+        self.mass_val = mass
+        self.inertia_val = inertia
+        self.gravity_val = gravity
+        self.b_val = b
+        self.H = H
+        self.angle_max = angle_max
+        self.origin_height = origin_height
+        self.define_system(
+            length, mass, inertia, gravity, b, H, angle_max, origin_height
+        )
+
+    def define_system(
+        self,
+        length_val,
+        mass_val,
+        inertia_val,
+        gravity_val,
+        b_val,
+        H_val,
+        angle_max_val,
+        origin_height_val,
+    ):
+        y, theta, y_dot, theta_dot = sp.symbols("y theta y_dot theta_dot", real=True)
+        u1, u2 = sp.symbols("u1 u2", real=True)
+        L, m, I, g, b = sp.symbols("L m I g b", real=True, positive=True)
+
+        self.parameters = {
+            L: length_val,
+            m: mass_val,
+            I: inertia_val,
+            g: gravity_val,
+            b: b_val,
+        }
+        self.state_vars = [y, theta, y_dot, theta_dot]  # nx = 4
+        self.control_vars = [u1, u2]
+
+        # Dynamics (same as before)
+        dy_dot = (1 / m) * sp.cos(theta) * (u1 + u2) - g - b * y_dot
+        dtheta_dot = (L / I) * (u1 - u2) - b * theta_dot
+
+        self._f_sym = sp.Matrix([dy_dot, dtheta_dot])
+
+        # Lidar observation model
+        # Create 4 lidar rays at different angles
+        ny = 4
+        lidar_rays = []
+
+        for i in range(ny):
+            # Linearly spaced angles from -angle_max to +angle_max
+            angle_offset = -angle_max_val + i * (2 * angle_max_val / (ny - 1))
+            phi = theta - angle_offset
+
+            # Basic ray calculation: distance = (height) / cos(angle)
+            ray_distance = (y + origin_height_val) / sp.cos(phi)
+
+            # Smooth approximation of clamping to [0, H]
+            # Use smooth functions to maintain differentiability
+            # smooth_clamp(x, 0, H) ≈ max(0, min(x, H))
+
+            # Soft ReLU for lower bound, soft minimum for upper bound
+            # soft_relu(x) = ln(1 + exp(k*x))/k  (approaches ReLU as k→∞)
+            # For symbolic computation, use: (x + sqrt(x^2 + eps))/2 which approximates ReLU
+
+            eps = 1e-6  # Small constant for numerical stability
+
+            # Soft ReLU: max(0, x) ≈ (x + sqrt(x^2 + eps))/2
+            soft_relu = (ray_distance + sp.sqrt(ray_distance**2 + eps)) / 2
+
+            # Soft min(x, H): H - soft_relu(H - x)
+            clamped_ray = (
+                H_val
+                - (H_val - soft_relu + sp.sqrt((H_val - soft_relu) ** 2 + eps)) / 2
+            )
+
+            lidar_rays.append(clamped_ray)
+
+        self._h_sym = sp.Matrix(lidar_rays)
+        self.output_vars = [
+            sp.Symbol(f"lidar_{i}", real=True) for i in range(ny)
+        ]  # ny = 4
+
+    @property
+    def u_equilibrium(self) -> torch.Tensor:
+        mg = self.mass_val * self.gravity_val
+        return torch.tensor([mg / 2, mg / 2])
+
+    @property
+    def length(self):
+        """For backward compatibility"""
+        return self.length_val
+
+    @property
+    def mass(self):
+        """For backward compatibility"""
+        return self.mass_val
+
+    @property
+    def inertia(self):
+        """For backward compatibility"""
+        return self.inertia_val
+
+    @property
+    def gravity(self):
+        """For backward compatibility"""
+        return self.gravity_val
+
+    @property
+    def b(self):
+        """For backward compatibility"""
+        return self.b_val
+
 class SymbolicQuadrotor2DState(SymbolicDynamicalSystem):
     """
     Planar quadrotor with full-state observation.
