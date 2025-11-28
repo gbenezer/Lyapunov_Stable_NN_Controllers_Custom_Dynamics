@@ -1356,7 +1356,7 @@ def compute_lyapunov_difference_metrics_monte_carlo(
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
-    
+
     n_dims = len(state_indices)
     
     # Compute domain volume
@@ -1373,6 +1373,21 @@ def compute_lyapunov_difference_metrics_monte_carlo(
         # Fallback: infer from state_limits
         nx = len(state_limits)
     
+    # VALIDATION: Ensure state_indices are valid for PHYSICAL state
+    if max(state_indices) >= nx:
+        raise ValueError(
+            f"state_indices {state_indices} contains index >= nx={nx}. "
+            f"For output feedback, state_indices must reference PHYSICAL state dimensions only (0 to {nx-1}), "
+            f"not augmented state dimensions. "
+            f"Valid indices: {tuple(range(nx))}"
+        )
+    
+    if len(state_limits) != len(state_indices):
+        raise ValueError(
+            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
+            f"These should match. Provide limits for each dimension you want to sample."
+        )
+
     # Generate random samples for PHYSICAL state only
     samples_x = torch.zeros((num_samples, nx), device=device)
     for i, idx in enumerate(state_indices):
@@ -1513,7 +1528,7 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
         state_indices = tuple(range(len(state_limits)))
     
     n_dims = len(state_indices)
-    
+
     # Compute domain volume
     domain_volume = 1.0
     for idx in state_indices:
@@ -1527,6 +1542,22 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
     else:
         # Fallback: assume state_limits defines the full physical state
         nx = len(state_limits)
+
+    
+    # VALIDATION: Ensure state_indices are valid for PHYSICAL state
+    if max(state_indices) >= nx:
+        raise ValueError(
+            f"state_indices {state_indices} contains index >= nx={nx}. "
+            f"For output feedback, state_indices must reference PHYSICAL state dimensions only (0 to {nx-1}), "
+            f"not augmented state dimensions. "
+            f"Valid indices: {tuple(range(nx))}"
+        )
+    
+    if len(state_limits) != len(state_indices):
+        raise ValueError(
+            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
+            f"These should match. Provide limits for each dimension you want to sample."
+        )
     
     # Generate Sobol samples for PHYSICAL state dimensions only
     bounds_for_sobol = tuple(state_limits[idx] for idx in state_indices)
@@ -1700,6 +1731,21 @@ def compute_lyapunov_difference_metrics_qmc_halton(
         # Fallback: infer from state_limits
         nx = len(state_limits)
     
+    # VALIDATION: Ensure state_indices are valid for PHYSICAL state
+    if max(state_indices) >= nx:
+        raise ValueError(
+            f"state_indices {state_indices} contains index >= nx={nx}. "
+            f"For output feedback, state_indices must reference PHYSICAL state dimensions only (0 to {nx-1}), "
+            f"not augmented state dimensions. "
+            f"Valid indices: {tuple(range(nx))}"
+        )
+    
+    if len(state_limits) != len(state_indices):
+        raise ValueError(
+            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
+            f"These should match. Provide limits for each dimension you want to sample."
+        )
+
     # Generate Halton samples for PHYSICAL state only
     bounds_for_halton = tuple(state_limits[idx] for idx in state_indices)
     halton_samples = generate_halton_samples(num_samples, n_dims, bounds_for_halton, device)
