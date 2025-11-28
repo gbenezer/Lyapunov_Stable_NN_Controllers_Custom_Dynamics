@@ -1164,26 +1164,46 @@ def compute_lyapunov_difference_discrete(
     observer_nn: Optional[torch.nn.Module] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Compute Lyapunov difference ΔV(x) = V(x_{k+1}) - V(x_k) for discrete-time systems
+    Compute Lyapunov difference ΔV(z) = V(z_{k+1}) - V(z_k) for discrete-time systems
     
     For output feedback with observer:
     - Assumes converged observer (estimation error e = 0)
-    - Automatically augments controller input with measurement if needed
     - Evaluates V([x, 0]) showing ideal closed-loop behavior
+    - Controller may receive [x_hat, y] (auto-detected based on input dimension)
     
     Args:
-        states: State samples
-                - State feedback: (batch_size, nx) containing x
+        states: State samples - ALWAYS AUGMENTED when observer is present
+                - State feedback: (batch_size, nx) containing physical state x
                 - Output feedback: (batch_size, 2*nx) containing [x, e]
+                  where x is physical state and e is estimation error
         lyapunov_nn: Lyapunov function
                     - State feedback: V(x), input dimension = nx
                     - Output feedback: V([x, e]), input dimension = 2*nx
-        controller_nn: Controller u = π(x) or π([x_hat, y])
+        controller_nn: Controller
+                      - State feedback: u = π(x), input dimension = nx
+                      - Output feedback: u = π(x_hat) or u = π([x_hat, y])
+                        Input dimension auto-detected and augmented if needed
         dynamics_fn: Discrete dynamics x_{k+1} = f(x_k, u_k)
-        observer_nn: Optional Luenberger observer
+                    Must have .h(x) method (or .continuous_time_system.h(x) for legacy)
+                    Must have .nx or .continuous_time_system.nx attribute
+        observer_nn: Optional Luenberger observer x_hat_{k+1} = g(x_hat_k, u_k, y_{k+1})
+                    If provided, assumes output feedback with augmented Lyapunov V([x,e])
     
     Returns:
-        V_current, V_next, delta_V
+        V_current: V(z_k) values (batch_size,)
+                  - State feedback: V(x_k)
+                  - Output feedback: V([x_k, e_k])
+        V_next: V(z_{k+1}) values (batch_size,)
+                - State feedback: V(x_{k+1})
+                - Output feedback: V([x_{k+1}, e_{k+1}])
+        delta_V: ΔV = V(z_{k+1}) - V(z_k) values (batch_size,)
+    
+    Notes:
+        - For ideal behavior analysis (typical use), the metric functions pass
+          states = [x, 0] where e=0 represents converged observer
+        - Controller input is automatically augmented with measurement y if needed
+          based on controller's expected input dimension
+        - Supports both legacy DiscreteTimeSystem and new GenericDiscreteTimeSystem
     """
     with torch.no_grad():
         legacy = False
