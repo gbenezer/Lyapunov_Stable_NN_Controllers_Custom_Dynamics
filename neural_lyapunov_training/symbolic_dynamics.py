@@ -2534,11 +2534,15 @@ class GenericDiscreteTimeSystem(nn.Module):
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
         colorway: Union[str, List[str]] = 'Plotly',
+        compact: bool = False,
+        aspect_ratio: float = 1.5,
+        max_height: Optional[int] = None,
+        max_width: Optional[int] = None,
         save_html: Optional[str] = None,
         show: bool = True,
     ):
         """
-        Plot trajectory using Plotly (interactive visualization)
+        Plot trajectory using Plotly (interactive visualization) with adaptive sizing
 
         Args:
             trajectory: State trajectory (T, nx) or (batch, T, nx)
@@ -2550,6 +2554,10 @@ class GenericDiscreteTimeSystem(nn.Module):
                     'Plotly' (default), 'D3', 'G10', 'T10', 'Alphabet', 
                     'Dark24', 'Light24', 'Set1', 'Pastel', 'Vivid', 
                     or a custom list of color strings
+            compact: If True, use smaller subplots for many variables (default: False)
+            aspect_ratio: Target width:height ratio per subplot (default: 1.5)
+            max_height: Maximum figure height in pixels (default: None = auto)
+            max_width: Maximum figure width in pixels (default: None = auto)
             save_html: If provided, save interactive plot to this HTML file
             show: If True, display the plot
         """
@@ -2590,14 +2598,81 @@ class GenericDiscreteTimeSystem(nn.Module):
         has_control = control_sequence is not None
         num_plots = self.nx + (self.nu if has_control else 0)
 
-        # Create subplots
-        if num_plots <= 3:
-            rows, cols = 1, num_plots
-        elif num_plots <= 6:
-            rows, cols = 2, (num_plots + 1) // 2
+        # Adaptive subplot layout calculation
+        def calculate_subplot_layout(n):
+            """Calculate optimal rows/cols based on number of plots"""
+            if n == 1:
+                return 1, 1
+            elif n == 2:
+                return 1, 2
+            elif n == 3:
+                return 1, 3
+            elif n == 4:
+                return 2, 2
+            elif n <= 6:
+                return 2, 3
+            elif n <= 9:
+                return 3, 3
+            elif n <= 12:
+                return 3, 4
+            else:
+                # For many plots, prefer more columns than rows (easier to scroll vertically)
+                cols = int(np.ceil(np.sqrt(n * 1.5)))
+                rows = int(np.ceil(n / cols))
+                return rows, cols
+        
+        rows, cols = calculate_subplot_layout(num_plots)
+
+        # Adaptive figure dimensions
+        def calculate_figure_dimensions(rows, cols, compact_mode, aspect):
+            """Calculate optimal figure width and height"""
+            if compact_mode:
+                base_subplot_height = 200
+                base_subplot_width = base_subplot_height * aspect
+            else:
+                # Scale based on layout
+                if rows == 1:
+                    base_subplot_height = 400  # Taller for single row
+                elif rows == 2:
+                    base_subplot_height = 350
+                elif rows == 3:
+                    base_subplot_height = 300
+                else:
+                    base_subplot_height = 280
+                
+                base_subplot_width = base_subplot_height * aspect
+            
+            # Calculate total dimensions
+            height = int(rows * base_subplot_height)
+            width = int(cols * base_subplot_width)
+            
+            # Apply caps
+            if max_height is not None:
+                height = min(height, max_height)
+            else:
+                # Default max based on typical screen heights
+                height = min(height, 1400)
+            
+            if max_width is not None:
+                width = min(width, max_width)
+            else:
+                # Default max based on typical screen widths
+                width = min(width, 1800)
+            
+            return width, height
+        
+        fig_width, fig_height = calculate_figure_dimensions(rows, cols, compact, aspect_ratio)
+
+        # Adaptive spacing based on layout
+        if rows > 3:
+            vertical_spacing = 0.15
         else:
-            rows = (num_plots + 2) // 3
-            cols = 3
+            vertical_spacing = 0.12
+        
+        if cols > 3:
+            horizontal_spacing = 0.08
+        else:
+            horizontal_spacing = 0.10
 
         # State names
         if state_names is None:
@@ -2608,11 +2683,27 @@ class GenericDiscreteTimeSystem(nn.Module):
             control_names = [f"u{i}" for i in range(self.nu)]
             subplot_titles.extend(control_names)
 
-        fig = make_subplots(rows=rows, cols=cols, subplot_titles=subplot_titles)
+        fig = make_subplots(
+            rows=rows, 
+            cols=cols, 
+            subplot_titles=subplot_titles,
+            vertical_spacing=vertical_spacing,
+            horizontal_spacing=horizontal_spacing,
+        )
 
         # Time axis
         T = traj_np.shape[1]
         time_steps = np.arange(T) * self.dt
+
+        # Adaptive font sizes based on compact mode and number of plots
+        if compact:
+            title_font_size = 12 if num_plots > 12 else 14
+            axis_font_size = 10 if num_plots > 12 else 11
+            tick_font_size = 9 if num_plots > 12 else 10
+        else:
+            title_font_size = 14
+            axis_font_size = 12
+            tick_font_size = 10
 
         # Plot states
         for i in range(self.nx):
@@ -2646,8 +2737,20 @@ class GenericDiscreteTimeSystem(nn.Module):
                     col=col,
                 )
 
-            fig.update_xaxes(title_text="Time (s)", row=row, col=col)
-            fig.update_yaxes(title_text=state_names[i], row=row, col=col)
+            fig.update_xaxes(
+                title_text="Time (s)", 
+                row=row, 
+                col=col,
+                title_font=dict(size=axis_font_size),
+                tickfont=dict(size=tick_font_size),
+            )
+            fig.update_yaxes(
+                title_text=state_names[i], 
+                row=row, 
+                col=col,
+                title_font=dict(size=axis_font_size),
+                tickfont=dict(size=tick_font_size),
+            )
 
         # Plot controls
         if has_control:
@@ -2684,24 +2787,45 @@ class GenericDiscreteTimeSystem(nn.Module):
                         col=col,
                     )
 
-                fig.update_xaxes(title_text="Time (s)", row=row, col=col)
-                fig.update_yaxes(title_text=f"u{i}", row=row, col=col)
+                fig.update_xaxes(
+                    title_text="Time (s)", 
+                    row=row, 
+                    col=col,
+                    title_font=dict(size=axis_font_size),
+                    tickfont=dict(size=tick_font_size),
+                )
+                fig.update_yaxes(
+                    title_text=f"u{i}", 
+                    row=row, 
+                    col=col,
+                    title_font=dict(size=axis_font_size),
+                    tickfont=dict(size=tick_font_size),
+                )
 
         # Update layout
         if title is None:
             title = f"{self.continuous_time_system.__class__.__name__} Trajectory"
 
         fig.update_layout(
-            title=title, 
-            height=300 * rows, 
+            title=dict(
+                text=title,
+                font=dict(size=title_font_size + 4),
+            ),
+            width=fig_width,
+            height=fig_height,
             showlegend=True, 
-            hovermode="x unified"
+            hovermode="x unified",
+            font=dict(size=tick_font_size),
         )
+
+        # Update subplot title font sizes
+        for annotation in fig.layout.annotations:
+            annotation.font.size = title_font_size
 
         # Save if requested
         if save_html:
             fig.write_html(save_html)
-            print(f"Interactive plot saved to {save_html}")
+            print(f"Interactive plot saved to {save_html} (size: {fig_width}x{fig_height}px)")
 
         # Show if requested
         if show:
