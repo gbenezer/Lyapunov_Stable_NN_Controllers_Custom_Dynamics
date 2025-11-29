@@ -26,7 +26,7 @@ dtype = torch.float
 @hydra.main(config_path="./config", config_name="quadrotor2d_output_training")
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
     quadrotor_continuous = quadrotor2d.Quadrotor2DLidarDynamics()
     dt = 0.01
@@ -271,7 +271,7 @@ def main(cfg: DictConfig):
         hard_max=True,
     )
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -405,20 +405,25 @@ def main(cfg: DictConfig):
             )
         )
 
-    quadrotor_state_limits = tuple(
-        (lower_limit[i], upper_limit[i]) for i in range(len(lower_limit))
+    quadrotor_state_limits = (
+    (lower_limit[0].item(), upper_limit[0].item()),  # y
+    (lower_limit[1].item(), upper_limit[1].item()),  # theta
+    (lower_limit[2].item(), upper_limit[2].item()),  # y_dot
+    (lower_limit[3].item(), upper_limit[3].item()),  # theta_dot
     )
 
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        observer_nn=observer,
+        dynamics_fn=dynamics,
         state_limits=quadrotor_state_limits,
         rho=rho,
         device=device,
     )
-
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given a Converged Observer and Rho",
     )
 
     labels = [r"$y$", r"$\theta$", r"$\dot y$", r"$\dot \theta$"]

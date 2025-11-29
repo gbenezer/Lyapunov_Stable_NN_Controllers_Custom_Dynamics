@@ -96,7 +96,7 @@ def plot_V(V, lower_limit, upper_limit):
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
 
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
     dt = 0.01
     quadrotor_continuous = quadrotor2d.Quadrotor2DDynamics()
@@ -335,7 +335,7 @@ def main(cfg: DictConfig):
     )
     # Check with pgd attack.
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,

@@ -29,11 +29,9 @@ dtype = torch.float
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
 
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
     grid_size = torch.tensor([10, 10, 5, 5], device=device)
-
-    train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
     pendulum_continuous = ss.SymbolicPendulum(m=0.15, l=0.5, beta=0.1, g=9.81)
@@ -319,7 +317,7 @@ def main(cfg: DictConfig):
         hard_max=True,
     )
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -469,8 +467,11 @@ def main(cfg: DictConfig):
             plt.plot(e_traj[:, :, 0], e_traj[:, :, 1], linewidth=2)
         plt.savefig(os.path.join(os.getcwd(), f"V_{kappa}_{str(plot_idx)}.png"))
 
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        observer_nn=observer,
+        dynamics_fn=dynamics,
         state_limits=(
             (lower_limit[0], upper_limit[0]),
             (lower_limit[1], upper_limit[1]),
@@ -478,9 +479,9 @@ def main(cfg: DictConfig):
         rho=rho,
         device=device,
     )
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function, Controller, and Observer Given Rho",
     )
 
     lrv.plot_lyapunov_2d(

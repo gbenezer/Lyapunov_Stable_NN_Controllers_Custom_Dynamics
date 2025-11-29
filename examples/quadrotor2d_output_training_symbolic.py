@@ -28,15 +28,15 @@ dtype = torch.float
 @hydra.main(config_path="./config", config_name="quadrotor2d_output_training")
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
-    quadrotor_continuous = ss.SymbolicQuadrotor2DOutput()
+    quadrotor_continuous = ss.SymbolicQuadrotor2DLidar()
     dt = 0.01
     dynamics = sd.GenericDiscreteTimeSystem(
-        quadrotor_continuous, 
-        dt, 
-        integration_method = sd.IntegrationMethod["RK4"],
-        position_integration = sd.IntegrationMethod["RK4"],
+        quadrotor_continuous,
+        dt,
+        integration_method=sd.IntegrationMethod["RK4"],
+        position_integration=sd.IntegrationMethod["RK4"],
     )
     dynamics.to(device)
 
@@ -75,8 +75,8 @@ def main(cfg: DictConfig):
             )
         )
     )
-    controller.eval()    
-    
+    controller.train()
+
     # Reference EKF observer
     ekf_observer = controllers.EKFObserver(
         dynamics, h, gamma=0, delta=1e-3, lam=0, alpha=1.1
@@ -98,8 +98,7 @@ def main(cfg: DictConfig):
             )
         )
     )
-    observer.eval()
-
+    observer.train()
 
     Q = np.diag(np.array([10, 20, 5, 5]))
     R = np.diag(np.array([1, 1]))
@@ -140,6 +139,7 @@ def main(cfg: DictConfig):
         R=R,
     )
     lyapunov_nn.to(device)
+    lyapunov_nn.train()
 
     kappa = cfg.model.kappa
     hard_max = cfg.train.hard_max
@@ -249,6 +249,23 @@ def main(cfg: DictConfig):
         },
         os.path.join(os.getcwd(), "lyapunov_nn.pth"),
     )
+    torch.save(
+        {
+            "state_dict": controller.state_dict(),
+            "rho": derivative_lyaloss.get_rho(),
+        },
+        os.path.join(os.getcwd(), "controller_nn.pth"),
+    )
+    torch.save(
+        {
+            "state_dict": observer.state_dict(),
+            "rho": derivative_lyaloss.get_rho(),
+        },
+        os.path.join(os.getcwd(), "observer_nn.pth"),
+    )
+    controller.eval()
+    observer.eval()
+    lyapunov_nn.eval()
 
     # "Verify" Lyapunov conditions with PGD attack
     derivative_lyaloss_check = lyapunov.LyapunovDerivativeDOFLoss(
@@ -263,7 +280,7 @@ def main(cfg: DictConfig):
         hard_max=True,
     )
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -395,6 +412,92 @@ def main(cfg: DictConfig):
                 os.getcwd(),
                 f"V_{kappa}_{candidate_roa_states_weight}_{str(plot_idx)}.png",
             )
+        )
+
+    quadrotor_state_limits = (
+    (lower_limit[0].item(), upper_limit[0].item()),  # y
+    (lower_limit[1].item(), upper_limit[1].item()),  # theta
+    (lower_limit[2].item(), upper_limit[2].item()),  # y_dot
+    (lower_limit[3].item(), upper_limit[3].item()),  # theta_dot
+    )
+
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
+        lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        observer_nn=observer,
+        dynamics_fn=dynamics,
+        state_limits=quadrotor_state_limits,
+        rho=rho,
+        device=device,
+    )
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given a Converged Observer and Rho",
+    )
+
+    labels = [r"$y$", r"$\theta$", r"$\dot y$", r"$\dot \theta$"]
+
+    plot_indices = (
+        (0, 1),  # y vs theta
+        (0, 2),  # y vs dot_y
+        (1, 3),  # theta vs dot_theta
+        (2, 3),  # dot_y vs_dot_theta
+    )
+
+    suffixes = (
+        "y_v_theta",
+        "y_v_dot_y",
+        "theta_v_dot_theta",
+        "dot_y_v_dot_theta",
+    )
+
+    titles = (
+        "Y and Angle",
+        "Y and Y Derivative",
+        "Angle and Angle Derivative",
+        "Y Derivative and Angle Derivative",
+    )
+
+    for idx_index, plot_idxes in enumerate(plot_indices):
+
+        name_tuple = (labels[plot_idxes[0]], labels[plot_idxes[1]])
+
+        state_lims = (
+            quadrotor_state_limits[plot_idxes[0]],
+            quadrotor_state_limits[plot_idxes[1]],
+        )
+
+        lrv.plot_lyapunov_2d(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            observer_nn=observer,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"2D Lyapunov Function, Symbolic 2D Quadrotor, Output LIDAR Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_2d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+        )
+
+        lrv.plot_lyapunov_3d_surface(
+            lyapunov_nn=lyapunov_nn,
+            controller_nn=controller,
+            dynamics_system=dynamics,
+            state_limits=state_lims,
+            state_names=name_tuple,
+            observer_nn=observer,
+            state_indices=plot_idxes,
+            rho=rho,
+            title=f"3D Lyapunov Function, Symbolic 2D Quadrotor, Output LIDAR Feedback, {titles[idx_index]}",
+            save_html=os.path.join(
+                os.getcwd(), f"lyapunov_3d_{suffixes[idx_index]}.html"
+            ),
+            show=False,
+            show_derivative=True,
         )
 
 

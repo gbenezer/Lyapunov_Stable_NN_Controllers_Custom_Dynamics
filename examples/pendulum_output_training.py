@@ -462,8 +462,11 @@ def main(cfg: DictConfig):
             plt.plot(e_traj[:, :, 0], e_traj[:, :, 1], linewidth=2)
         plt.savefig(os.path.join(os.getcwd(), f"V_{kappa}_{str(plot_idx)}.png"))
 
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        observer_nn=observer,
+        dynamics_fn=dynamics,
         state_limits=(
             (lower_limit[0], upper_limit[0]),
             (lower_limit[1], upper_limit[1]),
@@ -471,9 +474,9 @@ def main(cfg: DictConfig):
         rho=rho,
         device=device,
     )
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given a Converged Observer and Rho",
     )
 
     lrv.plot_lyapunov_2d(
@@ -487,7 +490,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("theta", "theta_dot"),
         rho=rho,
-        title="Lyapunov Function for Inverted Pendulum System, Output Feedback",
+        title="Lyapunov Function for Inverted Pendulum System, Output Feedback, Converged Observer",
         save_html=os.path.join(os.getcwd(), "lyapunov_2d.html"),
         show=False,
     )
@@ -502,7 +505,7 @@ def main(cfg: DictConfig):
         ),
         state_names=("theta", "theta_dot"),
         rho=rho,
-        title="Lyapunov Function for Inverted Pendulum System, Output Feedback",
+        title="Lyapunov Function for Inverted Pendulum System, Output Feedback, Converged Observer",
         save_html=os.path.join(os.getcwd(), "lyapunov_3d.html"),
         show=False,
         show_derivative=True,
