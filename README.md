@@ -96,40 +96,26 @@ These files use dynamical systems defined using our framework in `neural_lyapuno
 The main modifications in this fork are contained within the following files:
 
 1. `neural_lyapunov_training/symbolic_dynamics.py`
-    - Defines the following classes
-        - `SymbolicDynamicalSystem`
-            - Main superclass for user definition of arbitrary continous-time dynamical systems
-            - User defines subclasses this class and then defines `__init__` and `define_system` methods
-                - `__init__` must construct a field defining the order of the dynamical system `self.order` and a field that calls and stores `self.define_system`
-                - `define_system` is a method that should take `self` along with the constant numerical parameters of the system (e.g. gravitational constant, damping terms, etc.) and
-                    - Define a SymPy symbol for each state, control, and parameter variable of the system
-                    - Construct a Dictionary `self.parameters` with SymPy Symbol keys associating parameters to the values passed into the function
-                    - Construct lists `self.state_vars`, `self.control_vars`, `self.output_vars` containing the defined symbolic variables (`self.output_vars` is optional for full state feedback)
-                    - Define the functional form of the open-loop dynamical system $\frac{d}{dt}[x] = f(x, u)$ as a symbolic column vector in the private field `self._f_sym`
-                    - (Optional) Define the equilibrium state and equilibrium control action for the dynamical system using `self.x_equilibrium` and `self.u_equilibrium` (defaults to zero vectors of appropriate length).
-                    - (Optional) Define the observation function $y = h(x)$ as a symbolic column vector in the private field `self._h_sym` (defaults to full state observability)
-            - Once a user defines a nonlinear dynamical system in such a way, the following public methods are available
-                - `forward` evaluates the nonlinear dynamics given a state and control, or a batch of them, and `h` does the same for observations
-                - Generate NumPy or PyTorch-compatible numerical functions with `generate_numpy_function` or `generate_torch_function`
-                - `linearized_dynamics_symbolic`, `linearized_observation_symbolic`, `linearized_dynamics`, `linearized_observation` symbolically and numerically evaluate linearizations of dynamics and observations
-                - Check if the system's state and control equilibria are actually equilibria, evaluate eigenvalues of the linearized systems at the equilibrium, and check if the equilibrium is stable with `check_equilibrium`, `eigenvalues_at_equilibrium`, and `is_stable_equilibrium` respectively
-                - Calculate Linear-Quadratic Regulator control gain or Kalman filter gain for the continuous-time system with `lqr_control` and `kalman_gain`
-        - `GenericDiscreteTimeSystem`
-            - Wrapper class for the discretization of a continuous time nonlinear dynamical system
-            - User passes a `SymbolicDynamicalSystem` object along with a discretization time scale and a
-
-
-
-### Example Usage
-
-TODO: Go through examples of how to use the interface
-
-### Performance Evaluation
-
-#### Reproduction of Results with Hard-Coded Dynamics
-
-TODO: Add results of testing
-
-#### Assessment of Approach Scalability/Drawbacks
-
-TODO: Add results of varying state space dimensionality, controller size, observer size, etc.
+    - `SymbolicDynamicalSystem`
+        - Main superclass for user definition of arbitrary continous-time dynamical systems
+            - `__init__` must construct a field defining the order of the dynamical system `self.order` and a field that calls and stores `self.define_system`
+            - `define_system` is a method that should take `self` along with the constant numerical parameters of the system (e.g. gravitational constant, damping terms, etc.) and
+                - Define a SymPy symbol for each state, control, and parameter variable of the system
+                - Construct a Dictionary `self.parameters` with SymPy Symbol keys associating parameters to the values passed into the function
+                - Construct lists `self.state_vars`, `self.control_vars`, `self.output_vars` containing the defined symbolic variables (`self.output_vars` is optional for full state feedback)
+                - Define the functional form of the open-loop dynamical system $\frac{d}{dt}[x] = f(x, u)$ as a symbolic column vector in the private field `self._f_sym`
+                - (Optional) Define the equilibrium state and equilibrium control action for the dynamical system using `self.x_equilibrium` and `self.u_equilibrium` (defaults to zero vectors of appropriate length). Framework is currently limited to storing only one equilibrium, but certain methods can be passed equilibria separately. 
+                - (Optional) Define the observation function $y = h(x)$ as a symbolic column vector in the private field `self._h_sym` (defaults to full state observability)
+        - After definition and instantiation, the following public methods are available
+            - `forward` evaluates the nonlinear dynamics given a state and control, or a batch of them, and `h` does the same for observations
+            - Generate NumPy or PyTorch-compatible numerical functions with `generate_numpy_function` or `generate_torch_function`
+            - `linearized_dynamics_symbolic`, `linearized_observation_symbolic`, `linearized_dynamics`, `linearized_observation` symbolically and numerically evaluate linearizations of dynamics and observations
+            - Check if the system's state and control equilibria are actually equilibria, evaluate eigenvalues of the linearized systems at the equilibrium, and check if the equilibrium is stable with `check_equilibrium`, `eigenvalues_at_equilibrium`, and `is_stable_equilibrium` respectively
+            - Calculate Linear-Quadratic Regulator control gain or Kalman filter gain for the continuous-time system with `lqr_control` and `kalman_gain`
+    - `GenericDiscreteTimeSystem`
+        - Wrapper class for the discretization of a continuous time nonlinear dynamical system
+        - User passes a `SymbolicDynamicalSystem` object along with a discretization time scale and an integration method from "ExplicitEuler", "Midpoint", and "RK4" (and optionally a different integration method for position for systems higher than first-order) to the `GenericDiscreteTimeSystem` constructor method
+        - This object then allows a user to
+            - Compute the next state from a given initial state and control input with `forward`, or fully simulate one (or multiple) trajectories using `simulate`
+            - Calculate Linear-Quadratic Regulator control gain or Kalman filter gain for the discrete-time system with `dlqr_control` and `discrete_kalman_gain`
+            - Plot trajectories and phase portraits using 
