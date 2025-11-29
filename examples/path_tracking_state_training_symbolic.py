@@ -96,7 +96,7 @@ def plot_V_heatmap(V, lower_limit, upper_limit, rho):
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
 
-    train_utils.set_seed(cfg.seed)
+    # train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
     path_tracking_continuous = ss.PathTracking(speed=2.0, length=1.0, radius=10.0)
@@ -308,7 +308,7 @@ def main(cfg: DictConfig):
     pgd_verifier_find_counterexamples = False
     counterexamples_check = torch.zeros((0, 2), device=device)
     for seed in range(100):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -381,8 +381,10 @@ def main(cfg: DictConfig):
     fig.show()
     plt.savefig(os.path.join(os.getcwd(), "V_roa.png"))
 
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_fn=dynamics,
         state_limits=(
             (lower_limit[0], upper_limit[0]),
             (lower_limit[1], upper_limit[1]),
@@ -390,9 +392,9 @@ def main(cfg: DictConfig):
         rho=rho,
         device=device,
     )
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given Rho",
     )
     lrv.plot_lyapunov_2d(
         lyapunov_nn=lyapunov_nn,
