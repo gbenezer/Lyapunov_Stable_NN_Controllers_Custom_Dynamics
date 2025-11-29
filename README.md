@@ -118,4 +118,4 @@ The main modifications in this fork are contained within the following files:
         - This object then allows a user to
             - Compute the next state from a given initial state and control input with `forward`, or fully simulate one (or multiple) trajectories using `simulate`
             - Calculate Linear-Quadratic Regulator control gain or Kalman filter gain for the discrete-time system with `dlqr_control` and `discrete_kalman_gain`
-            - Plot trajectories and phase portraits using 
+            - Plot trajectories and phase portraits using `plot_trajectory` and `plot_phase_portrait_2d`
