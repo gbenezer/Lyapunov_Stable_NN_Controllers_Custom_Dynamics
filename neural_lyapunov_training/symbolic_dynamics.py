@@ -19,6 +19,7 @@ from enum import Enum
 import control
 import warnings
 import json
+import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -2531,6 +2532,8 @@ class GenericDiscreteTimeSystem(nn.Module):
         state_names: Optional[List[str]] = None,
         control_sequence: Optional[torch.Tensor] = None,
         title: Optional[str] = None,
+        trajectory_names: Optional[List[str]] = None,
+        colorway: Union[str, List[str]] = 'Plotly',
         save_html: Optional[str] = None,
         show: bool = True,
     ):
@@ -2542,6 +2545,11 @@ class GenericDiscreteTimeSystem(nn.Module):
             state_names: Names for state variables (uses x0, x1, ... if None)
             control_sequence: Optional control inputs (T, nu) or (batch, T, nu)
             title: Plot title
+            trajectory_names: Optional names for each trajectory (uses "Trajectory 1", etc. if None)
+            colorway: Plotly color sequence name or list of colors. Options:
+                    'Plotly' (default), 'D3', 'G10', 'T10', 'Alphabet', 
+                    'Dark24', 'Light24', 'Set1', 'Pastel', 'Vivid', 
+                    or a custom list of color strings
             save_html: If provided, save interactive plot to this HTML file
             show: If True, display the plot
         """
@@ -2558,6 +2566,25 @@ class GenericDiscreteTimeSystem(nn.Module):
 
         # Convert to numpy
         traj_np = trajectory.detach().cpu().numpy()
+
+        # Get color sequence
+        if isinstance(colorway, str):
+            # Map string names to Plotly color sequences
+            color_sequences = {
+                'Plotly': px.colors.qualitative.Plotly,
+                'D3': px.colors.qualitative.D3,
+                'G10': px.colors.qualitative.G10,
+                'T10': px.colors.qualitative.T10,
+                'Alphabet': px.colors.qualitative.Alphabet,
+                'Dark24': px.colors.qualitative.Dark24,
+                'Light24': px.colors.qualitative.Light24,
+                'Set1': px.colors.qualitative.Set1,
+                'Pastel': px.colors.qualitative.Pastel,
+                'Vivid': px.colors.qualitative.Vivid,
+            }
+            colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
+        else:
+            colors = colorway
 
         # Determine subplot layout
         has_control = control_sequence is not None
@@ -2593,15 +2620,27 @@ class GenericDiscreteTimeSystem(nn.Module):
             col = i % cols + 1
 
             for b in range(batch_size):
+                # Use same color for same trajectory across all subplots
+                color = colors[b % len(colors)]
+                
+                # Create trajectory name
+                if batch_size > 1:
+                    if trajectory_names is not None:
+                        traj_name = trajectory_names[b]
+                    else:
+                        traj_name = f"Trajectory {b+1}"
+                else:
+                    traj_name = state_names[i]
+                
                 fig.add_trace(
                     go.Scatter(
                         x=time_steps,
                         y=traj_np[b, :, i],
                         mode="lines",
-                        name=f"{state_names[i]}"
-                        + (f" (batch {b})" if batch_size > 1 else ""),
-                        showlegend=(batch_size > 1 or self.nx > 1),
-                        line=dict(width=2),
+                        name=traj_name,
+                        showlegend=(i == 0),  # Only show legend in first subplot
+                        legendgroup=f"traj_{b}",  # Group for linked legend behavior
+                        line=dict(width=2, color=color),
                     ),
                     row=row,
                     col=col,
@@ -2621,14 +2660,25 @@ class GenericDiscreteTimeSystem(nn.Module):
                 col = plot_idx % cols + 1
 
                 for b in range(batch_size):
+                    color = colors[b % len(colors)]
+                    
+                    if batch_size > 1:
+                        if trajectory_names is not None:
+                            traj_name = trajectory_names[b]
+                        else:
+                            traj_name = f"Trajectory {b+1}"
+                    else:
+                        traj_name = f"u{i}"
+                    
                     fig.add_trace(
                         go.Scatter(
                             x=control_time,
                             y=control_np[b, :, i],
                             mode="lines",
-                            name=f"u{i}" + (f" (batch {b})" if batch_size > 1 else ""),
-                            showlegend=(batch_size > 1 or self.nu > 1),
-                            line=dict(width=2, dash="dash"),
+                            name=traj_name,
+                            showlegend=False,  # Controls use same legend as states
+                            legendgroup=f"traj_{b}",
+                            line=dict(width=2, dash="dash", color=color),
                         ),
                         row=row,
                         col=col,
@@ -2642,7 +2692,10 @@ class GenericDiscreteTimeSystem(nn.Module):
             title = f"{self.continuous_time_system.__class__.__name__} Trajectory"
 
         fig.update_layout(
-            title=title, height=300 * rows, showlegend=True, hovermode="x unified"
+            title=title, 
+            height=300 * rows, 
+            showlegend=True, 
+            hovermode="x unified"
         )
 
         # Save if requested
@@ -2656,12 +2709,15 @@ class GenericDiscreteTimeSystem(nn.Module):
 
         return fig
 
+
     def plot_phase_portrait_2d(
         self,
         trajectory: torch.Tensor,
         state_indices: Tuple[int, int] = (0, 1),
         state_names: Optional[Tuple[str, str]] = None,
         title: Optional[str] = None,
+        trajectory_names: Optional[List[str]] = None,
+        colorway: Union[str, List[str]] = 'Plotly',
         save_html: Optional[str] = None,
         show: bool = True,
     ):
@@ -2673,6 +2729,8 @@ class GenericDiscreteTimeSystem(nn.Module):
             state_indices: Which two states to plot (default: first two)
             state_names: Names for the two states
             title: Plot title
+            trajectory_names: Optional names for each trajectory (uses "Trajectory 1", etc. if None)
+            colorway: Plotly color sequence name or list of colors
             save_html: If provided, save to this HTML file
             show: If True, display the plot
         """
@@ -2686,26 +2744,53 @@ class GenericDiscreteTimeSystem(nn.Module):
 
         traj_np = trajectory.detach().cpu().numpy()
 
+        # Get color sequence
+        if isinstance(colorway, str):
+            color_sequences = {
+                'Plotly': px.colors.qualitative.Plotly,
+                'D3': px.colors.qualitative.D3,
+                'G10': px.colors.qualitative.G10,
+                'T10': px.colors.qualitative.T10,
+                'Alphabet': px.colors.qualitative.Alphabet,
+                'Dark24': px.colors.qualitative.Dark24,
+                'Light24': px.colors.qualitative.Light24,
+                'Set1': px.colors.qualitative.Set1,
+                'Pastel': px.colors.qualitative.Pastel,
+                'Vivid': px.colors.qualitative.Vivid,
+            }
+            colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
+        else:
+            colors = colorway
+
         idx0, idx1 = state_indices
         if state_names is None:
             state_names = (f"x{idx0}", f"x{idx1}")
 
         fig = go.Figure()
 
-        # Plot trajectories
+        # First: Add all trajectory lines
         for b in range(batch_size):
+            color = colors[b % len(colors)]
+            
+            if trajectory_names is not None:
+                traj_name = trajectory_names[b]
+            else:
+                traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
+            
             fig.add_trace(
                 go.Scatter(
                     x=traj_np[b, :, idx0],
                     y=traj_np[b, :, idx1],
                     mode="lines+markers",
-                    name=f"Trajectory {b}" if batch_size > 1 else "Trajectory",
-                    line=dict(width=2),
-                    marker=dict(size=4),
+                    name=traj_name,
+                    line=dict(width=2, color=color),
+                    marker=dict(size=4, color=color),
+                    legendgroup=f"traj_{b}",
                 )
             )
 
-            # Mark start and end points
+        # Second: Add start/end markers for all trajectories
+        for b in range(batch_size):
             fig.add_trace(
                 go.Scatter(
                     x=[traj_np[b, 0, idx0]],
@@ -2714,6 +2799,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                     name="Start" if b == 0 else None,
                     marker=dict(size=12, color="green", symbol="star"),
                     showlegend=(b == 0),
+                    legendgroup="markers",
                 )
             )
 
@@ -2725,10 +2811,11 @@ class GenericDiscreteTimeSystem(nn.Module):
                     name="End" if b == 0 else None,
                     marker=dict(size=12, color="red", symbol="x"),
                     showlegend=(b == 0),
+                    legendgroup="markers",
                 )
             )
 
-        # Mark equilibrium if it's 2D
+        # Finally: Add equilibrium marker
         if self.nx >= 2:
             x_eq = self.continuous_time_system.x_equilibrium.detach().cpu().numpy()
             fig.add_trace(
@@ -2738,6 +2825,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                     mode="markers",
                     name="Equilibrium",
                     marker=dict(size=15, color="black", symbol="diamond"),
+                    legendgroup="markers",
                 )
             )
 
