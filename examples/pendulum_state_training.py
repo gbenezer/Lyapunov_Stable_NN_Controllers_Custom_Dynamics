@@ -122,7 +122,7 @@ def plot_V_heatmap(V, lower_limit, upper_limit, rho):
 def main(cfg: DictConfig):
     OmegaConf.save(cfg, os.path.join(os.getcwd(), "config.yaml"))
 
-    # train_utils.set_seed(cfg.seed)
+    train_utils.set_seed(cfg.seed)
 
     dt = cfg.model.dt
     pendulum_continuous = pendulum.PendulumDynamics(m=0.15, l=0.5, beta=0.1)
@@ -343,7 +343,7 @@ def main(cfg: DictConfig):
     )
     pgd_verifier_find_counterexamples = False
     for seed in range(50):
-        # train_utils.set_seed(seed)
+        train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
