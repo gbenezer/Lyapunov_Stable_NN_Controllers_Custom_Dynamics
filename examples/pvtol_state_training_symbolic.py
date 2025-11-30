@@ -115,7 +115,7 @@ def plot_V_heatmap(
 
 if __name__ == "__main__":
 
-    train_utils.set_seed(42)
+    # train_utils.set_seed(42)
     logger = logging.getLogger(__name__)
     dt = 0.05
     pvtol_continuous = ss.PVTOL()
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     )
     limit_scale = [0.25, 0.5, 1.0, 2.0]
     for scale in limit_scale:
-        limit = limit_scale * limit_base
+        limit = scale * limit_base
         lower_limit = -1 * limit
         upper_limit = 1 * limit
 
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     # Check with pgd attack.
     pgd_verifier_find_counterexamples = False
     for seed in range(200, 300):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -388,17 +388,18 @@ if __name__ == "__main__":
     quadrotor_state_limits = tuple(
         (lower_limit[i], upper_limit[i]) for i in range(len(lower_limit))
     )
-
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_fn=dynamics,
         state_limits=quadrotor_state_limits,
         rho=rho,
         device=device,
     )
-
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given Rho",
     )
 
     labels = [r"$x$", r"$y$", r"$\theta$", r"$\dot x$", r"$\dot y$", r"$\dot \theta$"]

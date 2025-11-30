@@ -46,7 +46,7 @@ def generate_candidate_states(limit, num_per_dim=3):
 
 def main():
 
-    train_utils.set_seed(42)
+    # train_utils.set_seed(42)
 
     dt = 0.01
     cartpole_continuous = ss.CartPole(
@@ -270,7 +270,7 @@ def main():
     )
     pgd_verifier_find_counterexamples = False
     for seed in range(50):
-        train_utils.set_seed(seed)
+        # train_utils.set_seed(seed)
         if V_decrease_within_roa:
             x_min_boundary = train_utils.calc_V_extreme_on_boundary_pgd(
                 lyapunov_nn,
@@ -315,9 +315,11 @@ def main():
 
     rho = derivative_lyaloss.get_rho().item()
     print("rho = ", rho)
-
-    computed_roa_metrics = rmet.compute_roa_area_qmc_sobol(
+    
+    computed_difference_metrics = rmet.compute_lyapunov_difference_metrics_qmc_sobol(
         lyapunov_nn=lyapunov_nn,
+        controller_nn=controller,
+        dynamics_fn=dynamics,
         state_limits=(
             (lower_limit[0], upper_limit[0]),
             (lower_limit[1], upper_limit[1]),
@@ -327,11 +329,10 @@ def main():
         rho=rho,
         device=device,
     )
-    rmet.print_roa_metrics(
-        computed_roa_metrics,
-        title="Computed Region of Attraction for Constructed Lyapunov Function and Given Rho",
+    rmet.print_lyapunov_difference_metrics(
+        computed_difference_metrics,
+        title="Computed Metrics for Constructed Lyapunov Function and Controller Given Rho",
     )
-
     # plots
     lrv.plot_lyapunov_2d(
         lyapunov_nn=lyapunov_nn,
