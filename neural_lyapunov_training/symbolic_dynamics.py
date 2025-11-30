@@ -2832,6 +2832,210 @@ class GenericDiscreteTimeSystem(nn.Module):
             fig.show()
 
         return fig
+    
+    def plot_trajectory_3d(
+        self,
+        trajectory: torch.Tensor,
+        state_indices: Tuple[int, int, int] = (0, 1, 2),
+        state_names: Optional[Tuple[str, str, str]] = None,
+        title: Optional[str] = None,
+        trajectory_names: Optional[List[str]] = None,
+        colorway: Union[str, List[str]] = 'Plotly',
+        save_html: Optional[str] = None,
+        show: bool = True,
+        show_markers: bool = True,
+        marker_size: int = 2,
+        line_width: int = 3,
+    ):
+        """
+        Plot 3D trajectory visualization with time-colored paths.
+
+        Args:
+            trajectory: State trajectory (T, nx) or (batch, T, nx)
+            state_indices: Which three states to plot (default: first three)
+            state_names: Names for the three states
+            title: Plot title
+            trajectory_names: Optional names for each trajectory
+            colorway: Plotly color sequence name or list of colors
+            save_html: If provided, save to this HTML file
+            show: If True, display the plot
+            show_markers: If True, show markers along trajectory
+            marker_size: Size of markers (default: 2)
+            line_width: Width of trajectory lines (default: 3)
+
+        Example:
+            >>> # Single trajectory with time coloring
+            >>> system.plot_trajectory_3d(traj, state_indices=(0, 1, 2),
+            ...                          state_names=('x', 'y', 'z'))
+            >>>
+            >>> # Multiple trajectories from different initial conditions
+            >>> trajs = torch.stack([traj1, traj2, traj3])
+            >>> system.plot_trajectory_3d(trajs, trajectory_names=['IC1', 'IC2', 'IC3'])
+        """
+
+        # Handle batched trajectories
+        if len(trajectory.shape) == 3:
+            batch_size = trajectory.shape[0]
+        else:
+            trajectory = trajectory.unsqueeze(0)
+            batch_size = 1
+
+        traj_np = trajectory.detach().cpu().numpy()
+
+        # Get color sequence
+        if isinstance(colorway, str):
+            color_sequences = {
+                'Plotly': px.colors.qualitative.Plotly,
+                'D3': px.colors.qualitative.D3,
+                'G10': px.colors.qualitative.G10,
+                'T10': px.colors.qualitative.T10,
+                'Alphabet': px.colors.qualitative.Alphabet,
+                'Dark24': px.colors.qualitative.Dark24,
+                'Light24': px.colors.qualitative.Light24,
+                'Set1': px.colors.qualitative.Set1,
+                'Pastel': px.colors.qualitative.Pastel,
+                'Vivid': px.colors.qualitative.Vivid,
+            }
+            colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
+        else:
+            colors = colorway
+
+        idx0, idx1, idx2 = state_indices
+        if state_names is None:
+            state_names = (f"x{idx0}", f"x{idx1}", f"x{idx2}")
+
+        fig = go.Figure()
+
+        # Time axis for color gradient
+        T = traj_np.shape[1]
+        time_steps = np.arange(T) * self.dt
+
+        # Plot each trajectory
+        for b in range(batch_size):
+            color = colors[b % len(colors)]
+            
+            if trajectory_names is not None:
+                traj_name = trajectory_names[b]
+            else:
+                traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
+            
+            # Main trajectory line with time-based color gradient
+            mode = "lines+markers" if show_markers else "lines"
+            fig.add_trace(
+                go.Scatter3d(
+                    x=traj_np[b, :, idx0],
+                    y=traj_np[b, :, idx1],
+                    z=traj_np[b, :, idx2],
+                    mode=mode,
+                    name=traj_name,
+                    line=dict(
+                        width=line_width, 
+                        color=time_steps,
+                        colorscale='Viridis',
+                        showscale=(b == 0),  # Only show colorbar for first trajectory
+                        colorbar=dict(
+                            title="Time (s)",
+                            x=1.02,
+                            xanchor='left',
+                            len=0.75,
+                            y=0.5,
+                            yanchor='middle',
+                        ),
+                    ),
+                    marker=dict(size=marker_size, color=time_steps, colorscale='Viridis', showscale=False) if show_markers else None,
+                    legendgroup=f"traj_{b}",
+                    hovertemplate=f"<b>{traj_name}</b><br>"
+                                  f"{state_names[0]}: %{{x:.4f}}<br>"
+                                  f"{state_names[1]}: %{{y:.4f}}<br>"
+                                  f"{state_names[2]}: %{{z:.4f}}<br>"
+                                  f"Time: %{{text:.3f}}s<extra></extra>",
+                    text=time_steps,
+                )
+            )
+
+        # Add start markers
+        for b in range(batch_size):
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[traj_np[b, 0, idx0]],
+                    y=[traj_np[b, 0, idx1]],
+                    z=[traj_np[b, 0, idx2]],
+                    mode="markers",
+                    name="Start" if b == 0 else None,
+                    marker=dict(size=8, color="green", symbol="diamond"),
+                    showlegend=(b == 0),
+                    legendgroup="markers",
+                    hovertemplate="<b>Start</b><extra></extra>",
+                )
+            )
+
+        # Add end markers
+        for b in range(batch_size):
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[traj_np[b, -1, idx0]],
+                    y=[traj_np[b, -1, idx1]],
+                    z=[traj_np[b, -1, idx2]],
+                    mode="markers",
+                    name="End" if b == 0 else None,
+                    marker=dict(size=8, color="red", symbol="x"),
+                    showlegend=(b == 0),
+                    legendgroup="markers",
+                    hovertemplate="<b>End</b><extra></extra>",
+                )
+            )
+
+        # Add equilibrium marker if system has at least 3 states
+        if self.nx >= 3:
+            x_eq = self.continuous_time_system.x_equilibrium.detach().cpu().numpy()
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[x_eq[idx0]],
+                    y=[x_eq[idx1]],
+                    z=[x_eq[idx2]],
+                    mode="markers",
+                    name="Equilibrium",
+                    marker=dict(size=10, color="black", symbol="square"),
+                    legendgroup="markers",
+                    hovertemplate="<b>Equilibrium</b><extra></extra>",
+                )
+            )
+
+        if title is None:
+            title = f"{self.continuous_time_system.__class__.__name__} 3D Trajectory"
+
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title=state_names[0],
+                yaxis_title=state_names[1],
+                zaxis_title=state_names[2],
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.3)
+                ),
+            ),
+            hovermode="closest",
+            width=1000,
+            height=700,
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                xanchor='left',
+                yanchor='top',
+                bgcolor='rgba(255, 255, 255, 0.8)',
+                bordercolor='rgba(0, 0, 0, 0.3)',
+                borderwidth=1,
+            ),
+        )
+
+        if save_html:
+            fig.write_html(save_html)
+            print(f"3D trajectory saved to {save_html}")
+
+        if show:
+            fig.show()
+
+        return fig
 
 
     def plot_phase_portrait_2d(
@@ -2968,6 +3172,203 @@ class GenericDiscreteTimeSystem(nn.Module):
         if save_html:
             fig.write_html(save_html)
             print(f"Phase portrait saved to {save_html}")
+
+        if show:
+            fig.show()
+
+        return fig
+    
+    def plot_phase_portrait_3d(
+        self,
+        trajectory: torch.Tensor,
+        state_indices: Tuple[int, int, int] = (0, 1, 2),
+        state_names: Optional[Tuple[str, str, str]] = None,
+        title: Optional[str] = None,
+        trajectory_names: Optional[List[str]] = None,
+        colorway: Union[str, List[str]] = 'Plotly',
+        save_html: Optional[str] = None,
+        show: bool = True,
+        show_time_markers: bool = False,
+        marker_interval: int = 10,
+    ):
+        """
+        Plot 3D phase portrait (state space visualization without time coloring).
+
+        Unlike plot_trajectory_3d which uses time-based color gradients, this function
+        uses solid colors per trajectory for clearer distinction between multiple paths.
+
+        Args:
+            trajectory: State trajectory (T, nx) or (batch, T, nx)
+            state_indices: Which three states to plot (default: first three)
+            state_names: Names for the three states
+            title: Plot title
+            trajectory_names: Optional names for each trajectory
+            colorway: Plotly color sequence name or list of colors
+            save_html: If provided, save to this HTML file
+            show: If True, display the plot
+            show_time_markers: If True, add periodic markers showing time progression
+            marker_interval: Interval for time markers (e.g., every 10 steps)
+
+        Example:
+            >>> # Compare multiple trajectories in phase space
+            >>> trajs = torch.stack([traj_ic1, traj_ic2, traj_ic3])
+            >>> system.plot_phase_portrait_3d(trajs, 
+            ...     state_indices=(0, 2, 4),
+            ...     state_names=('x', 'theta', 'v_x'),
+            ...     trajectory_names=['Stable', 'Limit Cycle', 'Divergent'])
+        """
+
+        # Handle batched trajectories
+        if len(trajectory.shape) == 3:
+            batch_size = trajectory.shape[0]
+        else:
+            trajectory = trajectory.unsqueeze(0)
+            batch_size = 1
+
+        traj_np = trajectory.detach().cpu().numpy()
+
+        # Get color sequence
+        if isinstance(colorway, str):
+            color_sequences = {
+                'Plotly': px.colors.qualitative.Plotly,
+                'D3': px.colors.qualitative.D3,
+                'G10': px.colors.qualitative.G10,
+                'T10': px.colors.qualitative.T10,
+                'Alphabet': px.colors.qualitative.Alphabet,
+                'Dark24': px.colors.qualitative.Dark24,
+                'Light24': px.colors.qualitative.Light24,
+                'Set1': px.colors.qualitative.Set1,
+                'Pastel': px.colors.qualitative.Pastel,
+                'Vivid': px.colors.qualitative.Vivid,
+            }
+            colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
+        else:
+            colors = colorway
+
+        idx0, idx1, idx2 = state_indices
+        if state_names is None:
+            state_names = (f"x{idx0}", f"x{idx1}", f"x{idx2}")
+
+        fig = go.Figure()
+
+        T = traj_np.shape[1]
+        time_steps = np.arange(T) * self.dt
+
+        # Plot each trajectory
+        for b in range(batch_size):
+            color = colors[b % len(colors)]
+            
+            if trajectory_names is not None:
+                traj_name = trajectory_names[b]
+            else:
+                traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
+            
+            # Main trajectory line (solid color)
+            fig.add_trace(
+                go.Scatter3d(
+                    x=traj_np[b, :, idx0],
+                    y=traj_np[b, :, idx1],
+                    z=traj_np[b, :, idx2],
+                    mode="lines",
+                    name=traj_name,
+                    line=dict(width=3, color=color),
+                    legendgroup=f"traj_{b}",
+                    hovertemplate=f"<b>{traj_name}</b><br>"
+                                  f"{state_names[0]}: %{{x:.4f}}<br>"
+                                  f"{state_names[1]}: %{{y:.4f}}<br>"
+                                  f"{state_names[2]}: %{{z:.4f}}<br>"
+                                  f"Time: %{{text:.3f}}s<extra></extra>",
+                    text=time_steps,
+                )
+            )
+
+            # Add periodic time markers if requested
+            if show_time_markers:
+                marker_indices = np.arange(0, T, marker_interval)
+                fig.add_trace(
+                    go.Scatter3d(
+                        x=traj_np[b, marker_indices, idx0],
+                        y=traj_np[b, marker_indices, idx1],
+                        z=traj_np[b, marker_indices, idx2],
+                        mode="markers",
+                        name=f"{traj_name} - Time Markers" if batch_size == 1 else None,
+                        marker=dict(size=3, color=color, opacity=0.5),
+                        showlegend=False,
+                        legendgroup=f"traj_{b}",
+                        hovertemplate=f"t=%{{text:.3f}}s<extra></extra>",
+                        text=time_steps[marker_indices],
+                    )
+                )
+
+        # Add start markers
+        for b in range(batch_size):
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[traj_np[b, 0, idx0]],
+                    y=[traj_np[b, 0, idx1]],
+                    z=[traj_np[b, 0, idx2]],
+                    mode="markers",
+                    name="Start" if b == 0 else None,
+                    marker=dict(size=10, color="green", symbol="diamond"),
+                    showlegend=(b == 0),
+                    legendgroup="markers",
+                    hovertemplate="<b>Start</b><extra></extra>",
+                )
+            )
+
+        # Add end markers
+        for b in range(batch_size):
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[traj_np[b, -1, idx0]],
+                    y=[traj_np[b, -1, idx1]],
+                    z=[traj_np[b, -1, idx2]],
+                    mode="markers",
+                    name="End" if b == 0 else None,
+                    marker=dict(size=10, color="red", symbol="x"),
+                    showlegend=(b == 0),
+                    legendgroup="markers",
+                    hovertemplate="<b>End</b><extra></extra>",
+                )
+            )
+
+        # Add equilibrium marker
+        if self.nx >= 3:
+            x_eq = self.continuous_time_system.x_equilibrium.detach().cpu().numpy()
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[x_eq[idx0]],
+                    y=[x_eq[idx1]],
+                    z=[x_eq[idx2]],
+                    mode="markers",
+                    name="Equilibrium",
+                    marker=dict(size=12, color="black", symbol="square"),
+                    legendgroup="markers",
+                    hovertemplate="<b>Equilibrium</b><extra></extra>",
+                )
+            )
+
+        if title is None:
+            title = f"{self.continuous_time_system.__class__.__name__} 3D Phase Portrait"
+
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title=state_names[0],
+                yaxis_title=state_names[1],
+                zaxis_title=state_names[2],
+                camera=dict(
+                    eye=dict(x=1.5, y=1.5, z=1.3)
+                ),
+            ),
+            hovermode="closest",
+            width=900,
+            height=700,
+        )
+
+        if save_html:
+            fig.write_html(save_html)
+            print(f"3D phase portrait saved to {save_html}")
 
         if show:
             fig.show()
