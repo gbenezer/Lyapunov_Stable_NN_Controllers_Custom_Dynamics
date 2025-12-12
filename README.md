@@ -1,9 +1,9 @@
-# Lyapunov-stable Neural Control for User-Defined Nonlinear Dynamics
+# Dynamics Specification for Neural Control Lyapunov Function and Neural Controller Training
 
 **CS 7268 Group Project, Fall 2025**  
 *Northeastern University - Verifiable Machine Learning*
 
-This repository extends the work from the paper:
+This repository fork extends the work from the paper:
 
 *Lujie Yang\*, Hongkai Dai\*, Zhouxing Shi, Cho-Jui Hsieh, Russ Tedrake, and Huan Zhang*  
 "[Lyapunov-stable Neural Control for State and Output Feedback: A Novel Formulation](https://arxiv.org/pdf/2404.07956.pdf)" (\*Equal contribution)
