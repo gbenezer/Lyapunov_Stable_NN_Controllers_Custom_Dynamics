@@ -354,7 +354,7 @@ def main():
     print("\n4. Training Lyapunov function for output feedback...")
 
     lyapunov_nn = train_output_feedback_lyapunov(
-        discrete_system, nn_controller, nn_observer, num_samples=8000, num_epochs=5000
+        discrete_system, nn_controller, nn_observer, num_samples=8000, num_epochs=10000
     )
 
     # Verify V(0, 0) = 0
@@ -543,7 +543,7 @@ def main():
     print(f"  Simulated {len(trajectories_multi)} trajectories")
 
     # ========================================================================
-    # 10. Plot 2D Lyapunov Function (y vs θ)
+    # 10. Plot 2D Lyapunov Function (y vs θ), Neural
     # ========================================================================
     print("\n10. Plotting 2D Lyapunov function (y-θ plane)...")
 
@@ -557,6 +557,106 @@ def main():
         rho=rho,
         grid_resolution=100,
         observer_nn=nn_observer,
+        # trajectories=trajectories_multi,
+        title="Quadrotor2D Lidar: Lyapunov Function (Output Feedback, Neural)",
+        save_html="quadrotor_lidar_lyapunov_2d_neural.html",
+        show=False,
+        colorscale="Viridis",
+        # trajectory_colorscale="Vivid",
+    )
+    print("  ✓ Saved: quadrotor_lidar_lyapunov_2d_neural.html")
+
+    # ========================================================================
+    # 11. Plot 2D Lyapunov (ẏ vs θ̇), Neural
+    # ========================================================================
+    print("\n11. Plotting 2D Lyapunov function (ẏ-θ̇ plane)...")
+
+    state_limits_vel = ((-1.5, 1.5), (-1.0, 1.0))
+    state_indices_vel = (2, 3)
+
+    plot_lyapunov_2d(
+        lyapunov_nn,
+        nn_controller,
+        discrete_system,
+        state_limits_vel,
+        state_indices=state_indices_vel,
+        state_names=("Vertical Velocity ẏ [m/s]", "Angular Velocity θ̇ [rad/s]"),
+        rho=rho,
+        grid_resolution=100,
+        observer_nn=nn_observer,
+        # trajectories=trajectories_multi,
+        title="Quadrotor2D Lidar: Lyapunov Function (Velocity Space, Output Feedback, Neural)",
+        save_html="quadrotor_lidar_lyapunov_2d_vel_neural.html",
+        show=False,
+        colorscale="Plasma",
+        # trajectory_colorscale="D3",
+    )
+    print("  ✓ Saved: quadrotor_lidar_lyapunov_2d_vel_neural.html")
+
+    # ========================================================================
+    # 12. Plot 3D Lyapunov Surface, Neural
+    # ========================================================================
+    print("\n12. Plotting 3D Lyapunov surface...")
+
+    plot_lyapunov_3d_surface(
+        lyapunov_nn,
+        state_limits_analysis,
+        controller_nn=nn_controller,
+        dynamics_system=discrete_system,
+        observer_nn=nn_observer,
+        state_indices=state_indices_analysis,
+        state_names=("Vertical Position y [m]", "Pitch Angle θ [rad]"),
+        rho=rho,
+        grid_resolution=60,
+        title="Quadrotor2D Lidar: V(y, θ) - Output Feedback, Neural",
+        save_html="quadrotor_lidar_lyapunov_3d_neural.html",
+        show=False,
+        colorscale="Viridis",
+        # trajectories=trajectories_multi,
+        # trajectory_colorscale="Vivid",
+    )
+    print("  ✓ Saved: quadrotor_lidar_lyapunov_3d_neural.html")
+
+    # ========================================================================
+    # 13. Plot 3D Dual Surface (V and ΔV), Neural
+    # ========================================================================
+    print("\n13. Plotting 3D dual surface (V and ΔV)...")
+
+    plot_lyapunov_3d_surface(
+        lyapunov_nn,
+        state_limits_analysis,
+        controller_nn=nn_controller,
+        dynamics_system=discrete_system,
+        observer_nn=nn_observer,
+        state_indices=state_indices_analysis,
+        state_names=("Vertical Position y [m]", "Pitch Angle θ [rad]"),
+        rho=rho,
+        grid_resolution=60,
+        title="Quadrotor2D Lidar: Lyapunov and Derivative (Output Feedback, Neural)",
+        save_html="quadrotor_lidar_lyapunov_3d_dual_neural.html",
+        show=False,
+        colorscale="Viridis",
+        show_derivative=True,
+        # trajectories=trajectories_multi,
+        # trajectory_colorscale="Vivid",
+    )
+    print("  ✓ Saved: quadrotor_lidar_lyapunov_3d_dual_neural.html")
+
+    # ========================================================================
+    # 10. Plot 2D Lyapunov Function (y vs θ)
+    # ========================================================================
+    print("\n10. Plotting 2D Lyapunov function (y-θ plane)...")
+
+    plot_lyapunov_2d(
+        lyapunov_nn,
+        linear_controller,
+        discrete_system,
+        state_limits_analysis,
+        state_indices=state_indices_analysis,
+        state_names=("Vertical Position y [m]", "Pitch Angle θ [rad]"),
+        rho=rho,
+        grid_resolution=100,
+        observer_nn=linear_observer,
         trajectories=trajectories_multi,
         title="Quadrotor2D Lidar: Lyapunov Function (Output Feedback)",
         save_html="quadrotor_lidar_lyapunov_2d.html",
@@ -576,14 +676,14 @@ def main():
 
     plot_lyapunov_2d(
         lyapunov_nn,
-        nn_controller,
+        linear_controller,
         discrete_system,
         state_limits_vel,
         state_indices=state_indices_vel,
         state_names=("Vertical Velocity ẏ [m/s]", "Angular Velocity θ̇ [rad/s]"),
         rho=rho,
         grid_resolution=100,
-        observer_nn=nn_observer,
+        observer_nn=linear_observer,
         trajectories=trajectories_multi,
         title="Quadrotor2D Lidar: Lyapunov Function (Velocity Space)",
         save_html="quadrotor_lidar_lyapunov_2d_vel.html",
@@ -601,9 +701,9 @@ def main():
     plot_lyapunov_3d_surface(
         lyapunov_nn,
         state_limits_analysis,
-        controller_nn=nn_controller,
+        controller_nn=linear_controller,
         dynamics_system=discrete_system,
-        observer_nn=nn_observer,
+        observer_nn=linear_observer,
         state_indices=state_indices_analysis,
         state_names=("Vertical Position y [m]", "Pitch Angle θ [rad]"),
         rho=rho,
@@ -625,9 +725,9 @@ def main():
     plot_lyapunov_3d_surface(
         lyapunov_nn,
         state_limits_analysis,
-        controller_nn=nn_controller,
+        controller_nn=linear_controller,
         dynamics_system=discrete_system,
-        observer_nn=nn_observer,
+        observer_nn=linear_observer,
         state_indices=state_indices_analysis,
         state_names=("Vertical Position y [m]", "Pitch Angle θ [rad]"),
         rho=rho,
