@@ -29,46 +29,48 @@ class ROAMetrics:
     grid_resolution: Optional[int] = None  # For grid method
     discrepancy: Optional[float] = None  # For QMC methods
 
+
 @dataclass
 class LyapunovDifferenceMetrics:
     """Container for Lyapunov difference metrics in discrete-time systems"""
-    
+
     rho: float  # ROA threshold
-    
+
     # Area/volume measurements
     area_roa: float  # Area where V(x) ≤ ρ
     area_decreasing: float  # Area where ΔV(x) ≤ 0
     area_verified_roa: float  # Area where both V(x) ≤ ρ AND ΔV(x) ≤ 0
     area_domain: float  # Total domain area
-    
+
     # Coverage ratios
     coverage_roa: float  # Fraction in ROA
     coverage_decreasing: float  # Fraction with ΔV ≤ 0
     coverage_verified_roa: float  # Fraction satisfying both
-    
+
     # Sample counts
     num_samples_in_roa: int
     num_samples_decreasing: int  # ΔV ≤ 0
     num_samples_verified_roa: int  # Both conditions
     num_samples_total: int
-    
+
     # Lyapunov difference statistics
     mean_delta_V: float  # Mean ΔV over all samples
     mean_delta_V_in_roa: float  # Mean ΔV in ROA only
     max_delta_V: float  # Maximum ΔV (worst violation)
     min_delta_V: float  # Minimum ΔV (best decrease)
     std_delta_V: float  # Standard deviation of ΔV
-    
+
     # Additional statistics
     max_violation_in_roa: float  # Worst ΔV violation within ROA
     percent_verified: float  # Percentage of ROA that is verified (ΔV ≤ 0)
-    
+
     # Metadata
     domain_bounds: Tuple
     method: str
     stability_threshold: float = 0.0  # Threshold for ΔV ≤ threshold
     grid_resolution: Optional[int] = None
     discrepancy: Optional[float] = None
+
 
 # Convert state_limits to CPU numpy if they're tensors
 def to_float(val):
@@ -261,7 +263,8 @@ def compute_roa_area_qmc_sobol(
 
     Args:
         lyapunov_nn: Lyapunov function V(x)
-        state_limits: Tuple of (min, max) for each dimension
+        state_limits: Tuple of (min, max) for EACH dimension in state_indices
+                     Example: state_indices=(1,3), state_limits has 2 entries
         rho: ROA threshold
         num_samples: Number of Sobol samples
         device: Computing device
@@ -281,10 +284,10 @@ def compute_roa_area_qmc_sobol(
 
     n_dims = len(state_indices)
 
-    # Compute domain volume
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
 
     # Infer total state dimension
     if hasattr(lyapunov_nn, "parameters"):
@@ -301,8 +304,8 @@ def compute_roa_area_qmc_sobol(
     else:
         nx_total = len(state_limits)
 
-    # Generate Sobol samples for the dimensions of interest
-    bounds_for_sobol = tuple(state_limits[idx] for idx in state_indices)
+    # FIXED: Generate Sobol samples using enumeration
+    bounds_for_sobol = tuple(state_limits[i] for i in range(len(state_limits)))
     sobol_samples = generate_sobol_samples(
         num_samples, n_dims, bounds_for_sobol, device, round_to_pow2
     )
@@ -331,8 +334,8 @@ def compute_roa_area_qmc_sobol(
     if compute_discrepancy_metric:
         # Normalize samples to [0,1]^d for discrepancy computation
         samples_normalized = np.zeros((num_samples_actual, n_dims))
-        for i, idx in enumerate(state_indices):
-            low, high = state_limits[idx]
+        for i in range(len(state_limits)):
+            low, high = state_limits[i]
             samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (
                 high - low
             )
@@ -373,7 +376,7 @@ def compute_roa_area_qmc_halton(
 
     Args:
         lyapunov_nn: Lyapunov function V(x)
-        state_limits: Tuple of (min, max) for each dimension
+        state_limits: Tuple of (min, max) for EACH dimension in state_indices
         rho: ROA threshold
         num_samples: Number of Halton samples
         device: Computing device
@@ -394,10 +397,10 @@ def compute_roa_area_qmc_halton(
 
     n_dims = len(state_indices)
 
-    # Compute domain volume
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
 
     # Infer total state dimension
     if hasattr(lyapunov_nn, "parameters"):
@@ -413,8 +416,8 @@ def compute_roa_area_qmc_halton(
     else:
         nx_total = len(state_limits)
 
-    # Generate Halton samples
-    bounds_for_halton = tuple(state_limits[idx] for idx in state_indices)
+    # FIXED: Generate Halton samples using enumeration
+    bounds_for_halton = tuple(state_limits[i] for i in range(len(state_limits)))
     halton_samples = generate_halton_samples(
         num_samples, n_dims, bounds_for_halton, device
     )
@@ -442,8 +445,8 @@ def compute_roa_area_qmc_halton(
     discrepancy_val = None
     if compute_discrepancy_metric:
         samples_normalized = np.zeros((num_samples_actual, n_dims))
-        for i, idx in enumerate(state_indices):
-            low, high = state_limits[idx]
+        for i in range(len(state_limits)):
+            low, high = state_limits[i]
             samples_normalized[:, i] = (halton_samples[:, i].cpu().numpy() - low) / (
                 high - low
             )
@@ -478,7 +481,7 @@ def compute_roa_area_monte_carlo(
 
     Args:
         lyapunov_nn: Lyapunov function V(x)
-        state_limits: Tuple of (min, max) for each dimension
+        state_limits: Tuple of (min, max) for EACH dimension in state_indices
         rho: ROA threshold (points where V(x) <= rho are in ROA)
         num_samples: Number of random samples
         device: Computing device
@@ -497,10 +500,10 @@ def compute_roa_area_monte_carlo(
 
     n_dims = len(state_indices)
 
-    # Compute domain volume (hyperrectangle)
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
 
     # Get total state dimension from Lyapunov network
     if hasattr(lyapunov_nn, "parameters"):
@@ -521,7 +524,7 @@ def compute_roa_area_monte_carlo(
     samples = torch.zeros((num_samples, nx_total), device=device)
 
     for i, idx in enumerate(state_indices):
-        low, high = state_limits[idx]
+        low, high = state_limits[i]  # FIXED: use i not idx
         samples[:, idx] = torch.rand(num_samples, device=device) * (high - low) + low
 
     # Set other dimensions to zero or equilibrium
@@ -583,7 +586,7 @@ def compute_roa_area_grid(
     # Create grid
     x0_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
     x1_range = np.linspace(state_limits[1][0], state_limits[1][1], grid_resolution)
-    X0, X1 = np.meshgrid(x0_range, x1_range, indexing='ij')
+    X0, X1 = np.meshgrid(x0_range, x1_range, indexing="ij")
 
     # Cell area
     dx0 = (state_limits[0][1] - state_limits[0][0]) / grid_resolution
@@ -1156,6 +1159,7 @@ def print_roa_metrics(metrics: ROAMetrics, title: Optional[str] = None):
     print(f"Coverage ratio: {metrics.coverage_ratio*100:.6f}%")
     print(f"{'='*70}")
 
+
 def compute_lyapunov_difference_discrete(
     states: torch.Tensor,
     lyapunov_nn: torch.nn.Module,
@@ -1165,12 +1169,12 @@ def compute_lyapunov_difference_discrete(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute Lyapunov difference ΔV(z) = V(z_{k+1}) - V(z_k) for discrete-time systems
-    
+
     For output feedback with observer:
     - Assumes converged observer (estimation error e = 0)
     - Evaluates V([x, 0]) showing ideal closed-loop behavior
     - Controller may receive [x_hat, y] (auto-detected based on input dimension)
-    
+
     Args:
         states: State samples - ALWAYS AUGMENTED when observer is present
                 - State feedback: (batch_size, nx) containing physical state x
@@ -1188,7 +1192,7 @@ def compute_lyapunov_difference_discrete(
                     Must have .nx or .continuous_time_system.nx attribute
         observer_nn: Optional Luenberger observer x_hat_{k+1} = g(x_hat_k, u_k, y_{k+1})
                     If provided, assumes output feedback with augmented Lyapunov V([x,e])
-    
+
     Returns:
         V_current: V(z_k) values (batch_size,)
                   - State feedback: V(x_k)
@@ -1197,7 +1201,7 @@ def compute_lyapunov_difference_discrete(
                 - State feedback: V(x_{k+1})
                 - Output feedback: V([x_{k+1}, e_{k+1}])
         delta_V: ΔV = V(z_{k+1}) - V(z_k) values (batch_size,)
-    
+
     Notes:
         - For ideal behavior analysis (typical use), the metric functions pass
           states = [x, 0] where e=0 represents converged observer
@@ -1216,7 +1220,7 @@ def compute_lyapunov_difference_discrete(
             nx = dynamics_fn.continuous_time_system.nx
         else:
             nx = dynamics_fn.nx
-        
+
         if observer_nn is not None:
             # Output feedback: states = [x, e]
             if states.shape[1] != 2 * nx:
@@ -1224,20 +1228,20 @@ def compute_lyapunov_difference_discrete(
                     f"For output feedback, states must have shape (batch, 2*nx={2*nx}), "
                     f"got shape {states.shape}"
                 )
-            
-            x_true = states[:, :nx]        # Physical state
-            e_current = states[:, nx:]     # Estimation error
+
+            x_true = states[:, :nx]  # Physical state
+            e_current = states[:, nx:]  # Estimation error
             x_hat_current = x_true - e_current  # Observer estimate
-            
+
             # Current Lyapunov value V([x, e])
             V_current = lyapunov_nn(states).squeeze()
-            
+
             # Get measurement from TRUE state
             if legacy:
                 y = dynamics_fn.continuous_time_system.h(x_true)
             else:
                 y = dynamics_fn.h(x_true)
-            
+
             # Prepare controller input - may need to augment with measurement
             # Infer expected controller input dimension
             controller_in_dim = None
@@ -1245,45 +1249,50 @@ def compute_lyapunov_difference_discrete(
                 controller_in_dim = controller_nn.net[0].in_features
             elif hasattr(controller_nn, "x_equilibrium"):
                 controller_in_dim = controller_nn.x_equilibrium.shape[0]
-            
+
             # Check if we need to augment observer estimate with measurement
-            if controller_in_dim is not None and x_hat_current.shape[1] < controller_in_dim:
+            if (
+                controller_in_dim is not None
+                and x_hat_current.shape[1] < controller_in_dim
+            ):
                 # Controller expects more inputs than just x_hat
                 deficit = controller_in_dim - x_hat_current.shape[1]
-                
+
                 if deficit == y.shape[1]:
                     # Most common: controller takes [x_hat, y]
                     controller_input = torch.cat([x_hat_current, y], dim=1)
                 else:
                     # Fallback: pad with zeros
-                    padding = torch.zeros((x_hat_current.shape[0], deficit), device=x_hat_current.device)
+                    padding = torch.zeros(
+                        (x_hat_current.shape[0], deficit), device=x_hat_current.device
+                    )
                     controller_input = torch.cat([x_hat_current, padding], dim=1)
             else:
                 # Controller takes just x_hat
                 controller_input = x_hat_current
-            
+
             # Compute control
             u = controller_nn(controller_input)
-            
+
             # TRUE state evolves
             x_next = dynamics_fn(x_true, u)
-            
+
             # Next measurement
             if legacy:
                 y_next = dynamics_fn.continuous_time_system.h(x_next)
             else:
                 y_next = dynamics_fn.h(x_next)
-            
+
             # Observer update
             x_hat_next = observer_nn(x_hat_current, u, y_next)
-            
+
             # Next estimation error
             e_next = x_next - x_hat_next
-            
+
             # Next augmented state z_{k+1} = [x_{k+1}, e_{k+1}]
             states_next = torch.cat([x_next, e_next], dim=1)
             V_next = lyapunov_nn(states_next).squeeze()
-            
+
         else:
             # State feedback: states = x
             if states.shape[1] != nx:
@@ -1291,24 +1300,24 @@ def compute_lyapunov_difference_discrete(
                     f"For state feedback, states must have shape (batch, nx={nx}), "
                     f"got shape {states.shape}"
                 )
-            
+
             x_true = states
-            
+
             # Current Lyapunov value V(x)
             V_current = lyapunov_nn(x_true).squeeze()
-            
+
             # Direct state feedback
             u = controller_nn(x_true)
-            
+
             # Next state
             x_next = dynamics_fn(x_true, u)
-            
+
             # Next Lyapunov value V(x_{k+1})
             V_next = lyapunov_nn(x_next).squeeze()
-        
+
         # Lyapunov difference
         delta_V = V_next - V_current
-    
+
     return V_current, V_next, delta_V
 
 
@@ -1326,44 +1335,42 @@ def compute_lyapunov_difference_metrics_monte_carlo(
 ) -> LyapunovDifferenceMetrics:
     """
     Compute Lyapunov difference metrics using Monte Carlo sampling
-    
+
     Samples over PHYSICAL state space only. For output feedback with observer,
     assumes converged observer (e=0) and augments samples internally with [x, 0].
-    
+
     Args:
         lyapunov_nn: Lyapunov function
                     - State feedback: V(x), input dimension = nx
                     - Output feedback: V([x, e]), input dimension = 2*nx
         controller_nn: Controller π(x) or π(x_hat)
         dynamics_fn: Discrete dynamics x_{k+1} = f(x_k, u_k)
-                    Must have .nx or .continuous_time_system.nx attribute
-        state_limits: Domain bounds for PHYSICAL state x only (NOT augmented)
-                     Example: For physical state nx=2, provide 2 limits
-        rho: ROA threshold (V(x) ≤ ρ defines ROA)
+        state_limits: Domain bounds for dimensions in state_indices (IN ORDER)
+        rho: ROA threshold
         num_samples: Number of random samples
-        device: Computing device ('cpu' or 'cuda')
-        observer_nn: Optional observer (if provided, assumes e=0 for ideal behavior)
+        device: Computing device
+        observer_nn: Optional observer
         state_indices: Which PHYSICAL dimensions to sample (None = all)
         stability_threshold: Threshold for stability (typically 0.0)
-    
+
     Returns:
         LyapunovDifferenceMetrics with comprehensive statistics
     """
-    
+
     # Convert to floats
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
-    
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
 
     n_dims = len(state_indices)
-    
-    # Compute domain volume
+
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
-    
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
+
     # Get PHYSICAL state dimension from dynamics system
     if hasattr(dynamics_fn, "continuous_time_system"):
         nx = dynamics_fn.continuous_time_system.nx
@@ -1372,7 +1379,7 @@ def compute_lyapunov_difference_metrics_monte_carlo(
     else:
         # Fallback: infer from state_limits
         nx = len(state_limits)
-    
+
     # VALIDATION: Ensure state_indices are valid for PHYSICAL state
     if max(state_indices) >= nx:
         raise ValueError(
@@ -1381,65 +1388,64 @@ def compute_lyapunov_difference_metrics_monte_carlo(
             f"not augmented state dimensions. "
             f"Valid indices: {tuple(range(nx))}"
         )
-    
+
     if len(state_limits) != len(state_indices):
         raise ValueError(
-            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
-            f"These should match. Provide limits for each dimension you want to sample."
+            f"state_limits has {len(state_limits)} entries but state_indices has {len(state_indices)} entries. "
+            f"These should match."
         )
 
     # Generate random samples for PHYSICAL state only
     samples_x = torch.zeros((num_samples, nx), device=device)
     for i, idx in enumerate(state_indices):
-        low, high = state_limits[idx]
+        low, high = state_limits[i]  # FIXED: use i not idx
         samples_x[:, idx] = torch.rand(num_samples, device=device) * (high - low) + low
-    
+
     # Set other PHYSICAL dimensions to equilibrium
     if hasattr(dynamics_fn, "continuous_time_system"):
         x_eq = dynamics_fn.continuous_time_system.x_equilibrium.to(device)
     else:
         x_eq = dynamics_fn.x_equilibrium.to(device)
-    
+
     for idx in range(nx):
         if idx not in state_indices:
             samples_x[:, idx] = x_eq[idx]
-    
+
     # Prepare samples for Lyapunov evaluation
     if observer_nn is not None:
         # Output feedback: augment with zero estimation error (ideal behavior)
         samples_e = torch.zeros((num_samples, nx), device=device)
-        samples = torch.cat([samples_x, samples_e], dim=1)  # Shape: (N, 2*nx)
+        samples = torch.cat([samples_x, samples_e], dim=1)
     else:
-        # State feedback: use physical state directly
-        samples = samples_x  # Shape: (N, nx)
-    
+        samples = samples_x
+
     # Compute Lyapunov values and differences
     V_current, V_next, delta_V = compute_lyapunov_difference_discrete(
         samples, lyapunov_nn, controller_nn, dynamics_fn, observer_nn=observer_nn
     )
-    
+
     # Classify samples
     in_roa = V_current <= rho
     is_decreasing = delta_V <= stability_threshold
     verified_roa = in_roa & is_decreasing
-    
+
     # Count samples
     num_in_roa = in_roa.sum().item()
     num_decreasing = is_decreasing.sum().item()
     num_verified_roa = verified_roa.sum().item()
-    
-    # Estimate areas/volumes (over PHYSICAL state space)
+
+    # Estimate areas/volumes
     area_roa = domain_volume * (num_in_roa / num_samples)
     area_decreasing = domain_volume * (num_decreasing / num_samples)
     area_verified_roa = domain_volume * (num_verified_roa / num_samples)
-    
-    # Compute statistics for all samples
+
+    # Compute statistics
     mean_delta_V = delta_V.mean().item()
     max_delta_V = delta_V.max().item()
     min_delta_V = delta_V.min().item()
     std_delta_V = delta_V.std().item()
-    
-    # Compute statistics within ROA
+
+    # Statistics within ROA
     if num_in_roa > 0:
         delta_V_in_roa = delta_V[in_roa]
         mean_delta_V_in_roa = delta_V_in_roa.mean().item()
@@ -1449,7 +1455,7 @@ def compute_lyapunov_difference_metrics_monte_carlo(
         mean_delta_V_in_roa = 0.0
         max_violation_in_roa = 0.0
         percent_verified = 0.0
-    
+
     return LyapunovDifferenceMetrics(
         rho=rho,
         area_roa=area_roa,
@@ -1475,6 +1481,7 @@ def compute_lyapunov_difference_metrics_monte_carlo(
         stability_threshold=stability_threshold,
     )
 
+
 def compute_lyapunov_difference_metrics_qmc_sobol(
     lyapunov_nn: torch.nn.Module,
     controller_nn: torch.nn.Module,
@@ -1491,50 +1498,46 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
 ) -> LyapunovDifferenceMetrics:
     """
     Compute Lyapunov difference metrics using Quasi-Monte Carlo (Sobol sequence)
-    
+
     Sobol sequences provide better coverage than random sampling,
     typically requiring 10-100x fewer samples for same accuracy.
-    
+
     Samples over PHYSICAL state space only. For output feedback with observer,
     assumes converged observer (e=0) and augments samples internally with [x, 0].
-    
+
     Args:
         lyapunov_nn: Lyapunov function
-                    - State feedback: V(x), input dimension = nx
-                    - Output feedback: V([x, e]), input dimension = 2*nx
-        controller_nn: Controller π(x) or π(x_hat)
-        dynamics_fn: Discrete dynamics x_{k+1} = f(x_k, u_k)
-                    Must have .nx or .continuous_time_system.nx attribute
-        state_limits: Domain bounds for PHYSICAL state x only (NOT augmented)
-                     Example: For physical state nx=2, provide 2 limits
+        controller_nn: Controller
+        dynamics_fn: Discrete dynamics
+        state_limits: Domain bounds for dimensions in state_indices (IN ORDER)
         rho: ROA threshold
         num_samples: Number of Sobol samples (will be rounded to power of 2)
         device: Computing device
-        observer_nn: Optional observer (if provided, assumes e=0 for ideal behavior)
+        observer_nn: Optional observer
         state_indices: Which PHYSICAL dimensions to sample (None = all)
         stability_threshold: Threshold for stability (typically 0.0)
         compute_discrepancy_metric: Whether to compute discrepancy (slow for large N)
         round_to_pow2: Round sample count to power of 2 for optimal Sobol properties
-    
+
     Returns:
         LyapunovDifferenceMetrics with comprehensive statistics
     """
-    
+
     # Convert to floats
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
-    
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
-    
+
     n_dims = len(state_indices)
 
-    # Compute domain volume
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
-    
-    # Get PHYSICAL state dimension from dynamics system (NOT Lyapunov network)
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
+
+    # Get PHYSICAL state dimension from dynamics system
     if hasattr(dynamics_fn, "continuous_time_system"):
         nx = dynamics_fn.continuous_time_system.nx
     elif hasattr(dynamics_fn, "nx"):
@@ -1543,8 +1546,7 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
         # Fallback: assume state_limits defines the full physical state
         nx = len(state_limits)
 
-    
-    # VALIDATION: Ensure state_indices are valid for PHYSICAL state
+    # VALIDATION
     if max(state_indices) >= nx:
         raise ValueError(
             f"state_indices {state_indices} contains index >= nx={nx}. "
@@ -1552,73 +1554,72 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
             f"not augmented state dimensions. "
             f"Valid indices: {tuple(range(nx))}"
         )
-    
+
     if len(state_limits) != len(state_indices):
         raise ValueError(
-            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
-            f"These should match. Provide limits for each dimension you want to sample."
+            f"state_limits has {len(state_limits)} entries but state_indices has {len(state_indices)} entries. "
+            f"These should match."
         )
-    
-    # Generate Sobol samples for PHYSICAL state dimensions only
-    bounds_for_sobol = tuple(state_limits[idx] for idx in state_indices)
+
+    # FIXED: Generate Sobol samples using enumeration
+    bounds_for_sobol = tuple(state_limits[i] for i in range(len(state_limits)))
     sobol_samples = generate_sobol_samples(
         num_samples, n_dims, bounds_for_sobol, device, round_to_pow2
     )
-    
+
     num_samples_actual = sobol_samples.shape[0]
-    
-    # Create PHYSICAL state samples (nx dimensions, NOT 2*nx)
+
+    # Create PHYSICAL state samples
     samples_x = torch.zeros((num_samples_actual, nx), device=device)
     for i, idx in enumerate(state_indices):
         samples_x[:, idx] = sobol_samples[:, i]
-    
+
     # Set other PHYSICAL dimensions to equilibrium
     if hasattr(dynamics_fn, "continuous_time_system"):
         x_eq = dynamics_fn.continuous_time_system.x_equilibrium.to(device)
     else:
         x_eq = dynamics_fn.x_equilibrium.to(device)
-    
+
     for idx in range(nx):
         if idx not in state_indices:
             samples_x[:, idx] = x_eq[idx]
-    
+
     # Prepare input for Lyapunov function
     if observer_nn is not None:
         # Output feedback: augment with zero estimation error (ideal behavior)
         samples_e = torch.zeros((num_samples_actual, nx), device=device)
-        samples = torch.cat([samples_x, samples_e], dim=1)  # Shape: (N, 2*nx)
+        samples = torch.cat([samples_x, samples_e], dim=1)
     else:
-        # State feedback: use physical state directly
-        samples = samples_x  # Shape: (N, nx)
-    
+        samples = samples_x
+
     # Compute Lyapunov values and differences
     # Pass AUGMENTED samples to compute_lyapunov_difference_discrete
     V_current, V_next, delta_V = compute_lyapunov_difference_discrete(
         samples, lyapunov_nn, controller_nn, dynamics_fn, observer_nn=observer_nn
     )
-    
+
     # Classify samples
     in_roa = V_current <= rho
     is_decreasing = delta_V <= stability_threshold
     verified_roa = in_roa & is_decreasing
-    
+
     # Count samples
     num_in_roa = in_roa.sum().item()
     num_decreasing = is_decreasing.sum().item()
     num_verified_roa = verified_roa.sum().item()
-    
-    # Estimate areas/volumes (over PHYSICAL state space)
+
+    # Estimate areas/volumes
     area_roa = domain_volume * (num_in_roa / num_samples_actual)
     area_decreasing = domain_volume * (num_decreasing / num_samples_actual)
     area_verified_roa = domain_volume * (num_verified_roa / num_samples_actual)
-    
-    # Compute statistics for all samples
+
+    # Compute statistics
     mean_delta_V = delta_V.mean().item()
     max_delta_V = delta_V.max().item()
     min_delta_V = delta_V.min().item()
     std_delta_V = delta_V.std().item()
-    
-    # Compute statistics within ROA
+
+    # Statistics within ROA
     if num_in_roa > 0:
         delta_V_in_roa = delta_V[in_roa]
         mean_delta_V_in_roa = delta_V_in_roa.mean().item()
@@ -1628,17 +1629,19 @@ def compute_lyapunov_difference_metrics_qmc_sobol(
         mean_delta_V_in_roa = 0.0
         max_violation_in_roa = 0.0
         percent_verified = 0.0
-    
+
     # Optionally compute discrepancy
     discrepancy_val = None
     if compute_discrepancy_metric:
         samples_normalized = np.zeros((num_samples_actual, n_dims))
-        for i, idx in enumerate(state_indices):
-            low, high = state_limits[idx]
-            samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (high - low)
+        for i in range(len(state_limits)):  # FIXED: use range(len(state_limits))
+            low, high = state_limits[i]
+            samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (
+                high - low
+            )
         samples_normalized = np.clip(samples_normalized, 0.0, 1.0)
         discrepancy_val = compute_discrepancy(samples_normalized, method="CD")
-    
+
     return LyapunovDifferenceMetrics(
         rho=rho,
         area_roa=area_roa,
@@ -1681,48 +1684,44 @@ def compute_lyapunov_difference_metrics_qmc_halton(
 ) -> LyapunovDifferenceMetrics:
     """
     Compute Lyapunov difference metrics using Quasi-Monte Carlo (Halton sequence)
-    
+
     Halton sequences are particularly good for lower dimensions (d ≤ 10).
-    
+
     Samples over PHYSICAL state space only. For output feedback with observer,
     assumes converged observer (e=0) and augments samples internally with [x, 0].
-    
+
     Args:
         lyapunov_nn: Lyapunov function
-                    - State feedback: V(x), input dimension = nx
-                    - Output feedback: V([x, e]), input dimension = 2*nx
-        controller_nn: Controller π(x) or π(x_hat)
-        dynamics_fn: Discrete dynamics x_{k+1} = f(x_k, u_k)
-                    Must have .nx or .continuous_time_system.nx attribute
-        state_limits: Domain bounds for PHYSICAL state x only (NOT augmented)
-                     Example: For physical state nx=2, provide 2 limits
+        controller_nn: Controller
+        dynamics_fn: Discrete dynamics
+        state_limits: Domain bounds for dimensions in state_indices (IN ORDER)
         rho: ROA threshold
         num_samples: Number of Halton samples
         device: Computing device
-        observer_nn: Optional observer (if provided, assumes e=0 for ideal behavior)
+        observer_nn: Optional observer
         state_indices: Which PHYSICAL dimensions to sample (None = all)
         stability_threshold: Threshold for stability (typically 0.0)
         compute_discrepancy_metric: Whether to compute discrepancy
-    
+
     Returns:
         LyapunovDifferenceMetrics with comprehensive statistics
     """
-    
+
     # Convert to floats
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
-    
+
     # Determine dimensions
     if state_indices is None:
         state_indices = tuple(range(len(state_limits)))
-    
+
     n_dims = len(state_indices)
-    
-    # Compute domain volume
+
+    # FIXED: Compute domain volume using enumeration index
     domain_volume = 1.0
-    for idx in state_indices:
-        domain_volume *= state_limits[idx][1] - state_limits[idx][0]
-    
-    # Get PHYSICAL state dimension from dynamics system
+    for i in range(len(state_limits)):
+        domain_volume *= state_limits[i][1] - state_limits[i][0]
+
+    # Get PHYSICAL state dimension
     if hasattr(dynamics_fn, "continuous_time_system"):
         nx = dynamics_fn.continuous_time_system.nx
     elif hasattr(dynamics_fn, "nx"):
@@ -1730,8 +1729,8 @@ def compute_lyapunov_difference_metrics_qmc_halton(
     else:
         # Fallback: infer from state_limits
         nx = len(state_limits)
-    
-    # VALIDATION: Ensure state_indices are valid for PHYSICAL state
+
+    # VALIDATION
     if max(state_indices) >= nx:
         raise ValueError(
             f"state_indices {state_indices} contains index >= nx={nx}. "
@@ -1739,70 +1738,71 @@ def compute_lyapunov_difference_metrics_qmc_halton(
             f"not augmented state dimensions. "
             f"Valid indices: {tuple(range(nx))}"
         )
-    
+
     if len(state_limits) != len(state_indices):
         raise ValueError(
-            f"state_limits has {len(state_limits)} entries but state_indices references {len(state_indices)} dimensions. "
-            f"These should match. Provide limits for each dimension you want to sample."
+            f"state_limits has {len(state_limits)} entries but state_indices has {len(state_indices)} entries. "
+            f"These should match."
         )
 
-    # Generate Halton samples for PHYSICAL state only
-    bounds_for_halton = tuple(state_limits[idx] for idx in state_indices)
-    halton_samples = generate_halton_samples(num_samples, n_dims, bounds_for_halton, device)
-    
+    # FIXED: Generate Halton samples using enumeration
+    bounds_for_halton = tuple(state_limits[i] for i in range(len(state_limits)))
+    halton_samples = generate_halton_samples(
+        num_samples, n_dims, bounds_for_halton, device
+    )
+
     num_samples_actual = halton_samples.shape[0]
-    
-    # Create PHYSICAL state samples (nx dimensions)
+
+    # Create PHYSICAL state samples
     samples_x = torch.zeros((num_samples_actual, nx), device=device)
     for i, idx in enumerate(state_indices):
         samples_x[:, idx] = halton_samples[:, i]
-    
-    # Set other PHYSICAL dimensions to equilibrium
+
+    # Set other dimensions to equilibrium
     if hasattr(dynamics_fn, "continuous_time_system"):
         x_eq = dynamics_fn.continuous_time_system.x_equilibrium.to(device)
     else:
         x_eq = dynamics_fn.x_equilibrium.to(device)
-    
+
     for idx in range(nx):
         if idx not in state_indices:
             samples_x[:, idx] = x_eq[idx]
-    
+
     # Prepare samples for Lyapunov evaluation
     if observer_nn is not None:
         # Output feedback: augment with zero estimation error (ideal behavior)
         samples_e = torch.zeros((num_samples_actual, nx), device=device)
-        samples = torch.cat([samples_x, samples_e], dim=1)  # Shape: (N, 2*nx)
+        samples = torch.cat([samples_x, samples_e], dim=1)
     else:
-        # State feedback: use physical state directly
-        samples = samples_x  # Shape: (N, nx)
-    
+        samples = samples_x
+
     # Compute Lyapunov values and differences
     V_current, V_next, delta_V = compute_lyapunov_difference_discrete(
         samples, lyapunov_nn, controller_nn, dynamics_fn, observer_nn=observer_nn
     )
-    
+
     # Classify samples
     in_roa = V_current <= rho
     is_decreasing = delta_V <= stability_threshold
     verified_roa = in_roa & is_decreasing
-    
+
     # Count samples
     num_in_roa = in_roa.sum().item()
     num_decreasing = is_decreasing.sum().item()
     num_verified_roa = verified_roa.sum().item()
-    
-    # Estimate areas/volumes (over PHYSICAL state space)
+
+    # Estimate areas/volumes
     area_roa = domain_volume * (num_in_roa / num_samples_actual)
     area_decreasing = domain_volume * (num_decreasing / num_samples_actual)
     area_verified_roa = domain_volume * (num_verified_roa / num_samples_actual)
-    
-    # Compute statistics for all samples
+
+    # Compute statistics
     mean_delta_V = delta_V.mean().item()
     max_delta_V = delta_V.max().item()
     min_delta_V = delta_V.min().item()
     std_delta_V = delta_V.std().item()
-    
-    # Compute statistics within ROA
+
+    # Statistics within ROA
     if num_in_roa > 0:
         delta_V_in_roa = delta_V[in_roa]
         mean_delta_V_in_roa = delta_V_in_roa.mean().item()
@@ -1812,17 +1812,19 @@ def compute_lyapunov_difference_metrics_qmc_halton(
         mean_delta_V_in_roa = 0.0
         max_violation_in_roa = 0.0
         percent_verified = 0.0
-    
+
     # Optionally compute discrepancy
     discrepancy_val = None
     if compute_discrepancy_metric:
         samples_normalized = np.zeros((num_samples_actual, n_dims))
-        for i, idx in enumerate(state_indices):
-            low, high = state_limits[idx]
-            samples_normalized[:, i] = (halton_samples[:, i].cpu().numpy() - low) / (high - low)
+        for i in range(len(state_limits)):  # FIXED: use range(len(state_limits))
+            low, high = state_limits[i]
+            samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (
+                high - low
+            )
         samples_normalized = np.clip(samples_normalized, 0.0, 1.0)
         discrepancy_val = compute_discrepancy(samples_normalized, method="CD")
-    
+
     return LyapunovDifferenceMetrics(
         rho=rho,
         area_roa=area_roa,
@@ -1851,12 +1853,11 @@ def compute_lyapunov_difference_metrics_qmc_halton(
 
 
 def print_lyapunov_difference_metrics(
-    metrics: LyapunovDifferenceMetrics,
-    title: Optional[str] = None
+    metrics: LyapunovDifferenceMetrics, title: Optional[str] = None
 ):
     """
     Pretty print Lyapunov difference metrics
-    
+
     Args:
         metrics: LyapunovDifferenceMetrics object
         title: Optional title for the output
@@ -1869,7 +1870,7 @@ def print_lyapunov_difference_metrics(
         print(f"\n{'='*80}")
         print(f"{'Lyapunov Difference Analysis (Discrete-Time)':^80}")
         print(f"{'='*80}")
-    
+
     print(f"\n{'Configuration':^80}")
     print(f"{'-'*80}")
     print(f"  Method: {metrics.method}")
@@ -1879,28 +1880,28 @@ def print_lyapunov_difference_metrics(
     print(f"  Domain volume: {metrics.area_domain:.6f}")
     if metrics.discrepancy is not None:
         print(f"  Discrepancy: {metrics.discrepancy:.6e} (lower = better uniformity)")
-    
+
     print(f"\n{'Region Classifications':^80}")
     print(f"{'-'*80}")
-    
+
     # ROA
     print(f"  ROA (V(x) ≤ ρ):")
     print(f"    Volume: {metrics.area_roa:.6f}")
     print(f"    Coverage: {metrics.coverage_roa*100:.2f}%")
     print(f"    Samples: {metrics.num_samples_in_roa:,}")
-    
+
     # Decreasing region
     print(f"\n  Decreasing region (ΔV ≤ {metrics.stability_threshold}):")
     print(f"    Volume: {metrics.area_decreasing:.6f}")
     print(f"    Coverage: {metrics.coverage_decreasing*100:.2f}%")
     print(f"    Samples: {metrics.num_samples_decreasing:,}")
-    
+
     # Verified ROA
     print(f"\n  Verified ROA (V ≤ ρ AND ΔV ≤ {metrics.stability_threshold}):")
     print(f"    Volume: {metrics.area_verified_roa:.6f}")
     print(f"    Coverage: {metrics.coverage_verified_roa*100:.2f}%")
     print(f"    Samples: {metrics.num_samples_verified_roa:,}")
-    
+
     print(f"\n{'Lyapunov Difference Statistics (ΔV)':^80}")
     print(f"{'-'*80}")
     print(f"  All samples:")
@@ -1908,27 +1909,33 @@ def print_lyapunov_difference_metrics(
     print(f"    Std Dev: {metrics.std_delta_V:.6f}")
     print(f"    Min: {metrics.min_delta_V:.6f}")
     print(f"    Max: {metrics.max_delta_V:.6f}")
-    
+
     if metrics.num_samples_in_roa > 0:
         print(f"\n  Within ROA:")
         print(f"    Mean: {metrics.mean_delta_V_in_roa:.6f}")
         print(f"    Max violation: {metrics.max_violation_in_roa:.6f}")
-    
+
     print(f"\n{'Verification Status':^80}")
     print(f"{'-'*80}")
-    
+
     if metrics.num_samples_in_roa > 0:
-        print(f"  ROA verification: {metrics.percent_verified:.2f}% of ROA has ΔV ≤ {metrics.stability_threshold}")
-        
+        print(
+            f"  ROA verification: {metrics.percent_verified:.2f}% of ROA has ΔV ≤ {metrics.stability_threshold}"
+        )
+
         if metrics.percent_verified == 100.0:
-            print(f"  ✓ All ROA points satisfy stability condition (ΔV ≤ {metrics.stability_threshold})")
+            print(
+                f"  ✓ All ROA points satisfy stability condition (ΔV ≤ {metrics.stability_threshold})"
+            )
         else:
             violation_pct = 100.0 - metrics.percent_verified
             print(f"  ✗ {violation_pct:.2f}% of ROA points violate stability condition")
-            print(f"    ({metrics.num_samples_in_roa - metrics.num_samples_verified_roa:,} samples)")
+            print(
+                f"    ({metrics.num_samples_in_roa - metrics.num_samples_verified_roa:,} samples)"
+            )
     else:
         print(f"  ⚠ No samples found in ROA")
-    
+
     print(f"{'='*80}\n")
 
 
@@ -1947,7 +1954,7 @@ def compare_lyapunov_difference_methods(
 ) -> Dict[str, LyapunovDifferenceMetrics]:
     """
     Compare Lyapunov difference estimates using different sampling methods
-    
+
     Args:
         lyapunov_nn: Lyapunov function
         controller_nn: Controller
@@ -1960,59 +1967,84 @@ def compare_lyapunov_difference_methods(
         state_indices: Which dimensions to analyze
         stability_threshold: Threshold for ΔV
         compute_discrepancy: Whether to compute discrepancy metric
-    
+
     Returns:
         Dict with metrics from different methods
     """
-    
+
     results = {}
-    
+
     # Monte Carlo
     print("Computing Lyapunov difference via Monte Carlo (random)...")
     mc_metrics = compute_lyapunov_difference_metrics_monte_carlo(
-        lyapunov_nn, controller_nn, dynamics_fn, state_limits, rho,
-        num_samples=num_samples, device=device, observer_nn=observer_nn,
-        state_indices=state_indices, stability_threshold=stability_threshold
+        lyapunov_nn,
+        controller_nn,
+        dynamics_fn,
+        state_limits,
+        rho,
+        num_samples=num_samples,
+        device=device,
+        observer_nn=observer_nn,
+        state_indices=state_indices,
+        stability_threshold=stability_threshold,
     )
     results["monte_carlo"] = mc_metrics
-    
+
     # Sobol QMC
     print("Computing Lyapunov difference via Quasi-Monte Carlo (Sobol)...")
     sobol_metrics = compute_lyapunov_difference_metrics_qmc_sobol(
-        lyapunov_nn, controller_nn, dynamics_fn, state_limits, rho,
-        num_samples=num_samples, device=device, observer_nn=observer_nn,
-        state_indices=state_indices, stability_threshold=stability_threshold,
-        compute_discrepancy_metric=compute_discrepancy
+        lyapunov_nn,
+        controller_nn,
+        dynamics_fn,
+        state_limits,
+        rho,
+        num_samples=num_samples,
+        device=device,
+        observer_nn=observer_nn,
+        state_indices=state_indices,
+        stability_threshold=stability_threshold,
+        compute_discrepancy_metric=compute_discrepancy,
     )
     results["qmc_sobol"] = sobol_metrics
-    
+
     # Halton QMC
     print("Computing Lyapunov difference via Quasi-Monte Carlo (Halton)...")
     halton_metrics = compute_lyapunov_difference_metrics_qmc_halton(
-        lyapunov_nn, controller_nn, dynamics_fn, state_limits, rho,
-        num_samples=num_samples, device=device, observer_nn=observer_nn,
-        state_indices=state_indices, stability_threshold=stability_threshold,
-        compute_discrepancy_metric=compute_discrepancy
+        lyapunov_nn,
+        controller_nn,
+        dynamics_fn,
+        state_limits,
+        rho,
+        num_samples=num_samples,
+        device=device,
+        observer_nn=observer_nn,
+        state_indices=state_indices,
+        stability_threshold=stability_threshold,
+        compute_discrepancy_metric=compute_discrepancy,
     )
     results["qmc_halton"] = halton_metrics
-    
+
     # Print comparison
-    print("\n" + "="*90)
+    print("\n" + "=" * 90)
     print(f"{'Method Comparison':^90}")
-    print("="*90)
-    print(f"{'Method':<20} {'ROA Vol':<12} {'Verified Vol':<12} {'% Verified':<12} {'Mean ΔV':<12}")
-    print("-"*90)
+    print("=" * 90)
+    print(
+        f"{'Method':<20} {'ROA Vol':<12} {'Verified Vol':<12} {'% Verified':<12} {'Mean ΔV':<12}"
+    )
+    print("-" * 90)
     for method_name, metrics in results.items():
-        print(f"{method_name:<20} {metrics.area_roa:<12.6f} {metrics.area_verified_roa:<12.6f} "
-              f"{metrics.percent_verified:<11.2f}% {metrics.mean_delta_V_in_roa:<12.6f}")
-    
+        print(
+            f"{method_name:<20} {metrics.area_roa:<12.6f} {metrics.area_verified_roa:<12.6f} "
+            f"{metrics.percent_verified:<11.2f}% {metrics.mean_delta_V_in_roa:<12.6f}"
+        )
+
     if compute_discrepancy:
         print(f"\n{'Discrepancy (lower = more uniform)':^90}")
-        print("-"*90)
+        print("-" * 90)
         for method_name, metrics in results.items():
             if metrics.discrepancy is not None:
                 print(f"  {method_name:<20}: {metrics.discrepancy:.6e}")
-    
-    print("="*90 + "\n")
-    
+
+    print("=" * 90 + "\n")
+
     return results
