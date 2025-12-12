@@ -102,7 +102,7 @@ python examples/quadrotor2d_output_training.py
 The symbolic dynamics framework is implemented in several key files:
 
 * `neural_lyapunov_training/symbolic_dynamics.py` - Core framework classes
-* `neural_lyapunov_training/symbolic_systems.py` - Example system definitions (15+ systems)
+* `neural_lyapunov_training/symbolic_systems.py` - Example system definitions
 * `neural_lyapunov_training/roa_metrics.py` - Region of Attraction quantification
 * `neural_lyapunov_training/lyapunov_roa_visualization.py` - Interactive visualization tools
 
@@ -923,7 +923,7 @@ print(f"B matches: {result['B_match']}, error: {result['B_error']}")
 
 ## Citation
 
-If you use this code, please cite the original paper and the course report:
+If you use this code, please cite the original paper, the course report, and the following key libraries:
 
 ```bibtex
 @article{yang2024lyapunov,
@@ -932,9 +932,7 @@ If you use this code, please cite the original paper and the course report:
   journal={arXiv preprint arXiv:2404.07956},
   year={2024}
 }
-```
 
-```bibtex
 @thesis{benezer2025lyapunov_extension,
   title={Dynamics Specification for Neural Control Lyapunov Function and Neural Controller Training},
   author={Benezer, Gil and Li, Fang-Hsin},
@@ -942,6 +940,56 @@ If you use this code, please cite the original paper and the course report:
   type={Final Project Report},
   year={2025},
   url={https://github.com/gbenezer/Lyapunov_Stable_NN_Controllers_Custom_Dynamics}
+}
+
+@article{10.7717/peerj-cs.103,
+ title = {SymPy: symbolic computing in Python},
+ author = {Meurer, Aaron and Smith, Christopher P. and Paprocki, Mateusz and \v{C}ert\'{i}k, Ond\v{r}ej and Kirpichev, Sergey B. and Rocklin, Matthew and Kumar, Amit and Ivanov, Sergiu and Moore, Jason K. and Singh, Sartaj and Rathnayake, Thilina and Vig, Sean and Granger, Brian E. and Muller, Richard P. and Bonazzi, Francesco and Gupta, Harsh and Vats, Shivam and Johansson, Fredrik and Pedregosa, Fabian and Curry, Matthew J. and Terrel, Andy R. and Rou\v{c}ka, \v{S}t\v{e}p\'{a}n and Saboo, Ashutosh and Fernando, Isuru and Kulal, Sumith and Cimrman, Robert and Scopatz, Anthony},
+ year = 2017,
+ month = Jan,
+ keywords = {Python, Computer algebra system, Symbolics},
+ abstract = {
+            SymPy is an open-source computer algebra system written in pure Python. It is built with a focus on extensibility and ease of use, through both interactive and programmatic applications. These characteristics have led SymPy to become a popular symbolic library for the scientific Python ecosystem. This paper presents the architecture of SymPy, a description of its features, and a discussion of select submodules. The supplementary material provides additional examples and further outlines details of the architecture and features of SymPy.
+         },
+ volume = 3,
+ pages = {e103},
+ journal = {PeerJ Computer Science},
+ issn = {2376-5992},
+ url = {https://doi.org/10.7717/peerj-cs.103},
+ doi = {10.7717/peerj-cs.103}
+}
+
+@misc{inc_collaborative_2015,
+	title = {Collaborative data science},
+	url = {https://plot.ly},
+	author = {Inc, Plotly Technologies},
+	year = {2015},
+	note = {Place: Montreal, QC
+Publisher: Plotly Technologies Inc.},
+}
+
+@article{2020SciPy-NMeth,
+  author  = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and
+            Haberland, Matt and Reddy, Tyler and Cournapeau, David and
+            Burovski, Evgeni and Peterson, Pearu and Weckesser, Warren and
+            Bright, Jonathan and {van der Walt}, St{\'e}fan J. and
+            Brett, Matthew and Wilson, Joshua and Millman, K. Jarrod and
+            Mayorov, Nikolay and Nelson, Andrew R. J. and Jones, Eric and
+            Kern, Robert and Larson, Eric and Carey, C J and
+            Polat, {\.I}lhan and Feng, Yu and Moore, Eric W. and
+            {VanderPlas}, Jake and Laxalde, Denis and Perktold, Josef and
+            Cimrman, Robert and Henriksen, Ian and Quintero, E. A. and
+            Harris, Charles R. and Archibald, Anne M. and
+            Ribeiro, Ant{\^o}nio H. and Pedregosa, Fabian and
+            {van Mulbregt}, Paul and {SciPy 1.0 Contributors}},
+  title   = {{{SciPy} 1.0: Fundamental Algorithms for Scientific
+            Computing in Python}},
+  journal = {Nature Methods},
+  year    = {2020},
+  volume  = {17},
+  pages   = {261--272},
+  adsurl  = {https://rdcu.be/b08Wh},
+  doi     = {10.1038/s41592-019-0686-2},
 }
 ```
 
@@ -954,3 +1002,10 @@ MIT License
 * Original paper authors for their foundational work
 * Northeastern University CS 7268 professor Dr. Michael Everett
 * auto_LiRPA and alpha-beta-CROWN developers
+
+## Future TODO Items
+
+- Construct capability to support systems with multiple equilibria
+- Construct methods to couple atomic systems into larger composite systems with controllable coupling
+- Develop clearer and more intuitive approaches to tuning/selecting algorithm hyperparameters given the bi-level optimization can diverge
+- Make Jupyter notebooks showing framework examples
