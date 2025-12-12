@@ -227,7 +227,9 @@ def _compute_lyapunov_derivative(
 
         # Infer controller output dimension
         # Try various attributes the controller might have
-        if hasattr(controller_nn, "out_dim"):
+        if hasattr(controller_nn, "control_dim"):
+            u_dim = controller_nn.control_dim
+        elif hasattr(controller_nn, "out_dim"):
             u_dim = controller_nn.out_dim
         elif hasattr(controller_nn, "output_dim"):
             u_dim = controller_nn.output_dim
