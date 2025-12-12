@@ -237,6 +237,8 @@ def _compute_lyapunov_derivative(
             u_dim = controller_nn.u_lo.shape[0]
         else:
             # Default to 1 for scalar control
+            print("Derivative computation function was unable to infer controller output dimension.")
+            print("Current assumption is scalar control (u_dim = 1)")
             u_dim = 1
 
         # Compute control input
