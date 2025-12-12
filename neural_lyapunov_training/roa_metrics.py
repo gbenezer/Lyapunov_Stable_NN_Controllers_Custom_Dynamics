@@ -1819,7 +1819,7 @@ def compute_lyapunov_difference_metrics_qmc_halton(
         samples_normalized = np.zeros((num_samples_actual, n_dims))
         for i in range(len(state_limits)):  # FIXED: use range(len(state_limits))
             low, high = state_limits[i]
-            samples_normalized[:, i] = (sobol_samples[:, i].cpu().numpy() - low) / (
+            samples_normalized[:, i] = (halton_samples[:, i].cpu().numpy() - low) / (
                 high - low
             )
         samples_normalized = np.clip(samples_normalized, 0.0, 1.0)
