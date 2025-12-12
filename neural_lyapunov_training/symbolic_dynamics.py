@@ -2910,9 +2910,14 @@ class GenericDiscreteTimeSystem(nn.Module):
         T = traj_np.shape[1]
         time_steps = np.arange(T) * self.dt
 
+        # Different colormaps for each trajectory
+        colormaps = ['Viridis', 'Plasma', 'Inferno', 'Magma', 'Cividis', 
+                     'Turbo', 'Blues', 'Greens', 'Reds', 'Purples']
+
         # Plot each trajectory
         for b in range(batch_size):
             color = colors[b % len(colors)]
+            colormap = colormaps[b % len(colormaps)]
             
             if trajectory_names is not None:
                 traj_name = trajectory_names[b]
@@ -2920,7 +2925,32 @@ class GenericDiscreteTimeSystem(nn.Module):
                 traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
             
             # Main trajectory line with time-based color gradient
+            # Use different colormap for each trajectory to distinguish them
             mode = "lines+markers" if show_markers else "lines"
+            
+            # For single trajectory, use time coloring with colorbar
+            # For multiple trajectories, use solid colors to distinguish
+            if batch_size == 1:
+                line_config = dict(
+                    width=line_width, 
+                    color=time_steps,
+                    colorscale=colormap,
+                    showscale=True,
+                    colorbar=dict(
+                        title="Time (s)",
+                        x=1.02,
+                        xanchor='left',
+                        len=0.75,
+                        y=0.5,
+                        yanchor='middle',
+                    ),
+                )
+                marker_config = dict(size=marker_size, color=time_steps, colorscale=colormap, showscale=False) if show_markers else None
+            else:
+                # Multiple trajectories: use solid colors for clarity
+                line_config = dict(width=line_width, color=color)
+                marker_config = dict(size=marker_size, color=color) if show_markers else None
+            
             fig.add_trace(
                 go.Scatter3d(
                     x=traj_np[b, :, idx0],
@@ -2928,21 +2958,8 @@ class GenericDiscreteTimeSystem(nn.Module):
                     z=traj_np[b, :, idx2],
                     mode=mode,
                     name=traj_name,
-                    line=dict(
-                        width=line_width, 
-                        color=time_steps,
-                        colorscale='Viridis',
-                        showscale=(b == 0),  # Only show colorbar for first trajectory
-                        colorbar=dict(
-                            title="Time (s)",
-                            x=1.02,
-                            xanchor='left',
-                            len=0.75,
-                            y=0.5,
-                            yanchor='middle',
-                        ),
-                    ),
-                    marker=dict(size=marker_size, color=time_steps, colorscale='Viridis', showscale=False) if show_markers else None,
+                    line=line_config,
+                    marker=marker_config,
                     legendgroup=f"traj_{b}",
                     hovertemplate=f"<b>{traj_name}</b><br>"
                                   f"{state_names[0]}: %{{x:.4f}}<br>"
