@@ -354,7 +354,7 @@ def main():
     print("\n4. Training Lyapunov function for output feedback...")
 
     lyapunov_nn = train_output_feedback_lyapunov(
-        discrete_system, nn_controller, nn_observer, num_samples=8000, num_epochs=10000
+        discrete_system, nn_controller, nn_observer, num_samples=8000, num_epochs=1000
     )
 
     # Verify V(0, 0) = 0
@@ -642,13 +642,18 @@ def main():
     )
     print("  ✓ Saved: quadrotor_lidar_lyapunov_3d_dual_neural.html")
 
+    ###### train linear Lyapunov function
+    linear_lyapunov_nn = train_output_feedback_lyapunov(
+        discrete_system, linear_controller, linear_observer, num_samples=8000, num_epochs=1000
+    )
+
     # ========================================================================
     # 10. Plot 2D Lyapunov Function (y vs θ)
     # ========================================================================
     print("\n10. Plotting 2D Lyapunov function (y-θ plane)...")
 
     plot_lyapunov_2d(
-        lyapunov_nn,
+        linear_lyapunov_nn,
         linear_controller,
         discrete_system,
         state_limits_analysis,
@@ -675,7 +680,7 @@ def main():
     state_indices_vel = (2, 3)
 
     plot_lyapunov_2d(
-        lyapunov_nn,
+        linear_lyapunov_nn,
         linear_controller,
         discrete_system,
         state_limits_vel,
@@ -699,7 +704,7 @@ def main():
     print("\n12. Plotting 3D Lyapunov surface...")
 
     plot_lyapunov_3d_surface(
-        lyapunov_nn,
+        linear_lyapunov_nn,
         state_limits_analysis,
         controller_nn=linear_controller,
         dynamics_system=discrete_system,
@@ -723,7 +728,7 @@ def main():
     print("\n13. Plotting 3D dual surface (V and ΔV)...")
 
     plot_lyapunov_3d_surface(
-        lyapunov_nn,
+        linear_lyapunov_nn,
         state_limits_analysis,
         controller_nn=linear_controller,
         dynamics_system=discrete_system,
