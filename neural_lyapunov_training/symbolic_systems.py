@@ -94,52 +94,6 @@ class SymbolicPendulum(SymbolicDynamicalSystem):
         return self.inertia_val
 
 
-class SymbolicPendulumState(SymbolicDynamicalSystem):
-    """
-    Simple inverted pendulum - first-order formulation with full state observation.
-
-    Identical to SymbolicPendulum except:
-    - Output: y = [θ, θ̇] (full state, not just angle)
-    - Used for full-state feedback scenarios
-
-    See Also:
-    --------
-    SymbolicPendulum : Partial observation variant (measures only angle)
-    """
-
-    def __init__(
-        self, m: float = 1.0, l: float = 1.0, beta: float = 1.0, g: float = 9.81
-    ):
-        super().__init__()
-        self.order = 1
-        # Store values for backward compatibility
-        self.m_val = m
-        self.l_val = l
-        self.beta_val = beta
-        self.g_val = g
-        self.inertia_val = m * l**2
-        self.define_system(m, l, beta, g)
-
-    def define_system(self, m_val, l_val, beta_val, g_val):
-        theta, theta_dot = sp.symbols("theta theta_dot", real=True)
-        u = sp.symbols("u", real=True)
-        m, l, beta, g = sp.symbols("m l beta g", real=True, positive=True)
-
-        self.parameters = {m: m_val, l: l_val, beta: beta_val, g: g_val}
-        self.state_vars = [theta, theta_dot]
-        self.control_vars = [u]
-
-        ml2 = m * l * l
-        self._f_sym = sp.Matrix(
-            [theta_dot, (-beta / ml2) * theta_dot + (g / l) * sp.sin(theta) + u / ml2]
-        )
-
-        @property
-        def inertia(self):
-            """For backward compatibility"""
-            return self.inertia_val
-
-
 class SymbolicPendulum2ndOrder(SymbolicDynamicalSystem):
     """
     Inverted pendulum - second-order formulation (returns ONLY acceleration).
@@ -379,73 +333,6 @@ class SymbolicQuadrotor2D(SymbolicDynamicalSystem):
         """For backward compatibility"""
         return self.gravity_val
 
-
-class SymbolicQuadrotor2DOutput(SymbolicDynamicalSystem):
-    """
-
-    """
-
-    def __init__(
-        self,
-        length: float = 0.25,
-        mass: float = 0.486,
-        inertia: float = 0.00383,
-        gravity: float = 9.81,
-    ):
-        super().__init__()
-        self.order = 2
-        # Store values for backward compatibility
-        self.length_val = length
-        self.mass_val = mass
-        self.inertia_val = inertia
-        self.gravity_val = gravity
-        self.define_system(length, mass, inertia, gravity)
-
-    def define_system(self, length_val, mass_val, inertia_val, gravity_val):
-        y, theta, y_dot, theta_dot = sp.symbols(
-            "y theta y_dot theta_dot", real=True
-        )
-        u1, u2 = sp.symbols("u1 u2", real=True)
-        L, m, I, g = sp.symbols("L m I g", real=True, positive=True)
-
-        self.parameters = {L: length_val, m: mass_val, I: inertia_val, g: gravity_val}
-        self.state_vars = [y, theta, y_dot, theta_dot] # nx = 4
-        self.control_vars = [u1, u2]
-        self.output_vars = [y, theta, y_dot, theta_dot] # ny = 4
-
-        # For second-order system, forward() returns acceleration
-        # dx_dot = (-1 / m) * sp.sin(theta) * (u1 + u2)
-        dy_dot = (1 / m) * sp.cos(theta) * (u1 + u2) - g
-        dtheta_dot = (L / I) * (u1 - u2)
-
-        self._f_sym = sp.Matrix([dy_dot, dtheta_dot])
-        self._h_sym = sp.Matrix([y, theta, y_dot, theta_dot])
-
-    @property
-    def u_equilibrium(self) -> torch.Tensor:
-        mg = self.mass_val * self.gravity_val
-        return torch.tensor([mg / 2, mg / 2])
-
-    @property
-    def length(self):
-        """For backward compatibility"""
-        return self.length_val
-
-    @property
-    def mass(self):
-        """For backward compatibility"""
-        return self.mass_val
-
-    @property
-    def inertia(self):
-        """For backward compatibility"""
-        return self.inertia_val
-
-    @property
-    def gravity(self):
-        """For backward compatibility"""
-        return self.gravity_val
-
 class SymbolicQuadrotor2DLidar(SymbolicDynamicalSystem):
     """
     Symbolic representation of a planar (2D) quadrotor with lidar-based partial observations.
@@ -639,78 +526,6 @@ class SymbolicQuadrotor2DLidar(SymbolicDynamicalSystem):
     def b(self):
         """For backward compatibility"""
         return self.b_val
-
-class SymbolicQuadrotor2DState(SymbolicDynamicalSystem):
-    """
-    Planar quadrotor with full-state observation.
-
-    Identical to SymbolicQuadrotor2D except:
-    - Output: y = [x, y, θ, ẋ, ẏ, θ̇] (full state)
-    - Used for full-state feedback control
-
-    See Also:
-    --------
-    SymbolicQuadrotor2D : Partial observation variant (position + angle only)
-    """
-
-    def __init__(
-        self,
-        length: float = 0.25,
-        mass: float = 0.486,
-        inertia: float = 0.00383,
-        gravity: float = 9.81,
-    ):
-        super().__init__()
-        self.order = 2
-        # Store values for backward compatibility
-        self.length_val = length
-        self.mass_val = mass
-        self.inertia_val = inertia
-        self.gravity_val = gravity
-        self.define_system(length, mass, inertia, gravity)
-
-    def define_system(self, length_val, mass_val, inertia_val, gravity_val):
-        x, y, theta, x_dot, y_dot, theta_dot = sp.symbols(
-            "x y theta x_dot y_dot theta_dot", real=True
-        )
-        u1, u2 = sp.symbols("u1 u2", real=True)
-        L, m, I, g = sp.symbols("L m I g", real=True, positive=True)
-
-        self.parameters = {L: length_val, m: mass_val, I: inertia_val, g: gravity_val}
-        self.state_vars = [x, y, theta, x_dot, y_dot, theta_dot]
-        self.control_vars = [u1, u2]
-
-        # For second-order system, forward() returns acceleration
-        dx_dot = (-1 / m) * sp.sin(theta) * (u1 + u2)
-        dy_dot = (1 / m) * sp.cos(theta) * (u1 + u2) - g
-        dtheta_dot = (L / I) * (u1 - u2)
-
-        self._f_sym = sp.Matrix([dx_dot, dy_dot, dtheta_dot])
-
-    @property
-    def u_equilibrium(self) -> torch.Tensor:
-        mg = self.mass_val * self.gravity_val
-        return torch.tensor([mg / 2, mg / 2])
-
-    @property
-    def length(self):
-        """For backward compatibility"""
-        return self.length_val
-
-    @property
-    def mass(self):
-        """For backward compatibility"""
-        return self.mass_val
-
-    @property
-    def inertia(self):
-        """For backward compatibility"""
-        return self.inertia_val
-
-    @property
-    def gravity(self):
-        """For backward compatibility"""
-        return self.gravity_val
 
 
 class FifthOrderMechanicalSystem(SymbolicDynamicalSystem):
