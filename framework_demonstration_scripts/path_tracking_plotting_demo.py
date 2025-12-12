@@ -150,7 +150,7 @@ def main():
         title='Path Tracking: Single Trajectory Response (States)',
         colorway='Plotly',
         save_html='path_tracking_2d_trajectory_states.html',
-        show=True
+        show=False  # Don't display, just save
     )
     
     print("  ✓ Saved: path_tracking_2d_trajectory_states.html")
@@ -167,7 +167,7 @@ def main():
         title='Path Tracking: Single Trajectory Response (States + Control)',
         colorway='Plotly',
         save_html='path_tracking_2d_trajectory_with_control.html',
-        show=True
+        show=False
     )
     
     print("  ✓ Saved: path_tracking_2d_trajectory_with_control.html")
@@ -211,7 +211,7 @@ def main():
         title='Path Tracking: Phase Portrait (Multiple ICs)',
         colorway='Dark24',
         save_html='path_tracking_phase_portrait_2d.html',
-        show=True
+        show=False
     )
     
     print("  ✓ Saved: path_tracking_phase_portrait_2d.html")
@@ -236,7 +236,7 @@ def main():
         title='Path Tracking: 3D Trajectory (Time Evolution)',
         colorway='Viridis',
         save_html='path_tracking_3d_trajectory_time.html',
-        show=True,
+        show=False,
         show_markers=True,
         marker_size=2,
         line_width=3
@@ -270,7 +270,7 @@ def main():
         title=f'Path Tracking: 3D Phase Portrait ({len(subset_indices)} Trajectories)',
         colorway='Set1',
         save_html='path_tracking_phase_portrait_3d.html',
-        show=True,
+        show=False,
         show_time_markers=True,
         marker_interval=25  # Mark every 0.5 seconds
     )
@@ -366,7 +366,7 @@ def main():
         title='Path Tracking: Comparison of Representative Initial Conditions',
         colorway='Vivid',
         save_html='path_tracking_comparison.html',
-        show=True
+        show=False
     )
     
     print("  ✓ Saved: path_tracking_comparison.html")
@@ -384,7 +384,7 @@ def main():
         title='Path Tracking: Phase Portrait (Selected ICs)',
         colorway='Vivid',
         save_html='path_tracking_phase_selected.html',
-        show=True
+        show=False
     )
     
     print("  ✓ Saved: path_tracking_phase_selected.html")
