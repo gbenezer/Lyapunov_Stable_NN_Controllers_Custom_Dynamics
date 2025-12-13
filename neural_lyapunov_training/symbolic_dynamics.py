@@ -2531,6 +2531,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         trajectory: torch.Tensor,
         state_names: Optional[List[str]] = None,
         control_sequence: Optional[torch.Tensor] = None,
+        control_names: Optional[List[str]] = None,
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
         colorway: Union[str, List[str]] = "Plotly",
@@ -2548,6 +2549,7 @@ class GenericDiscreteTimeSystem(nn.Module):
             trajectory: State trajectory (T, nx) or (batch, T, nx)
             state_names: Names for state variables (uses x0, x1, ... if None)
             control_sequence: Optional control inputs (T, nu) or (batch, T, nu)
+            control_names: Names for control variables (uses u0, u1, ... if None)
             title: Plot title
             trajectory_names: Optional names for each trajectory (uses "Trajectory 1", etc. if None)
             colorway: Plotly color sequence name or list of colors. Options:
@@ -2681,8 +2683,10 @@ class GenericDiscreteTimeSystem(nn.Module):
             state_names = [f"x{i}" for i in range(self.nx)]
 
         subplot_titles = state_names.copy()
-        if has_control:
+        if has_control and control_names == None:
             control_names = [f"u{i}" for i in range(self.nu)]
+            subplot_titles.extend(control_names)
+        elif has_control:
             subplot_titles.extend(control_names)
 
         fig = make_subplots(
@@ -2797,7 +2801,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                     tickfont=dict(size=tick_font_size),
                 )
                 fig.update_yaxes(
-                    title_text=f"u{i}",
+                    title_text=control_names[i],
                     row=row,
                     col=col,
                     title_font=dict(size=axis_font_size),
