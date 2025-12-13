@@ -239,7 +239,9 @@ def _compute_lyapunov_derivative(
             u_dim = controller_nn.u_lo.shape[0]
         else:
             # Default to 1 for scalar control
-            print("Derivative computation function was unable to infer controller output dimension.")
+            print(
+                "Derivative computation function was unable to infer controller output dimension."
+            )
             print("Current assumption is scalar control (u_dim = 1)")
             u_dim = 1
 
@@ -274,7 +276,7 @@ def _compute_lyapunov_derivative(
             print(f"z_estimate shape: {z_estimate.shape}")
             print(f"y shape: {y.shape}")
             print(f"Controller expects: {controller_in_dim}")
-            
+
             if controller_in_dim is None:
                 # Try to infer from x_equilibrium
                 if hasattr(controller_nn, "x_equilibrium"):
@@ -559,14 +561,16 @@ def plot_lyapunov_2d(
     # Overlay trajectories if provided
     if trajectories is not None:
         import plotly.express as px
-        
+
         # Get the color sequence
         try:
             color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
         except AttributeError:
-            print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+            print(
+                f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead."
+            )
             color_sequence = px.colors.qualitative.Plotly
-        
+
         for i, traj in enumerate(trajectories):
             traj_np = traj.detach().cpu().numpy()
             color = color_sequence[i % len(color_sequence)]
@@ -649,6 +653,7 @@ def plot_lyapunov_2d(
 
     return fig
 
+
 def plot_lyapunov_2d_error_slices(
     lyapunov_nn,
     controller_nn,
@@ -667,91 +672,96 @@ def plot_lyapunov_2d_error_slices(
 ):
     """
     Plot Lyapunov function AND derivative showing impact of estimation error
-    
+
     For each error value, shows:
     - V([x, e]) contours
     - ROA boundary (V = ρ)
     - Decreasing region (ΔV ≤ 0)
     - Verified ROA (both conditions)
-    
+
     This USES controller and observer to compute closed-loop ΔV.
     """
-    
+
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
     device = next(lyapunov_nn.parameters()).device
     idx0, idx1 = state_indices
-    
+
     # Get physical state dimension
     if hasattr(dynamics_system, "continuous_time_system"):
         nx = dynamics_system.continuous_time_system.nx
     else:
         nx = dynamics_system.nx
-    
+
     # Create physical state grid
     x0_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
     x1_range = np.linspace(state_limits[1][0], state_limits[1][1], grid_resolution)
     X0, X1 = np.meshgrid(x0_range, x1_range)
-    
+
     n_points = grid_resolution * grid_resolution
     states_physical = torch.zeros((n_points, nx), device=device)
-    states_physical[:, idx0] = torch.tensor(X0.flatten(), dtype=torch.float32, device=device)
-    states_physical[:, idx1] = torch.tensor(X1.flatten(), dtype=torch.float32, device=device)
-    
+    states_physical[:, idx0] = torch.tensor(
+        X0.flatten(), dtype=torch.float32, device=device
+    )
+    states_physical[:, idx1] = torch.tensor(
+        X1.flatten(), dtype=torch.float32, device=device
+    )
+
     # Set equilibrium for other dimensions
     if hasattr(dynamics_system, "continuous_time_system"):
         x_eq = dynamics_system.continuous_time_system.x_equilibrium.to(device)
     else:
         x_eq = dynamics_system.x_equilibrium.to(device)
-    
+
     for i in range(nx):
         if i not in state_indices:
             states_physical[:, i] = x_eq[i]
-    
+
     # Create subplots: 2 rows (V and ΔV) × n_slices columns
     n_slices = len(error_values)
     fig = make_subplots(
-        rows=2, cols=n_slices,
-        subplot_titles=[f"e_{error_dim}={e:.3f}" for e in error_values] + 
-                       [f"ΔV at e_{error_dim}={e:.3f}" for e in error_values],
+        rows=2,
+        cols=n_slices,
+        subplot_titles=[f"e_{error_dim}={e:.3f}" for e in error_values]
+        + [f"ΔV at e_{error_dim}={e:.3f}" for e in error_values],
         specs=[[{"type": "contour"}] * n_slices] * 2,
         vertical_spacing=0.15,
         horizontal_spacing=0.08,
     )
-    
+
     # Compute V and ΔV for each error value
     for i, error_val in enumerate(error_values):
         col = i + 1
-        
+
         # Create estimation error vector
         estimation_error = torch.zeros((n_points, nx), device=device)
         estimation_error[:, error_dim] = error_val
-        
+
         # Augmented state [x, e]
         states_augmented = torch.cat([states_physical, estimation_error], dim=1)
-        
+
         # Compute V and ΔV using the controller and observer
         with torch.no_grad():
             # Current V([x, e])
             V_current = lyapunov_nn(states_augmented).squeeze()
-            
+
             # Extract components
             x_true = states_augmented[:, :nx]
             e_current = states_augmented[:, nx:]
             x_hat = x_true - e_current
-            
+
             # Get measurement
             if hasattr(dynamics_system, "continuous_time_system"):
                 y = dynamics_system.continuous_time_system.h(x_true)
             else:
                 y = dynamics_system.h(x_true)
-            
+
             # Controller input (auto-detect augmentation)
             controller_in_dim = None
             if hasattr(controller_nn, "net"):
                 controller_in_dim = controller_nn.net[0].in_features
             elif hasattr(controller_nn, "x_equilibrium"):
                 controller_in_dim = controller_nn.x_equilibrium.shape[0]
-            
+
             if controller_in_dim is not None and x_hat.shape[1] < controller_in_dim:
                 deficit = controller_in_dim - x_hat.shape[1]
                 if deficit == y.shape[1]:
@@ -761,36 +771,36 @@ def plot_lyapunov_2d_error_slices(
                     controller_input = torch.cat([x_hat, padding], dim=1)
             else:
                 controller_input = x_hat
-            
+
             # Compute control
             u = controller_nn(controller_input)
-            
+
             # Evolve physical state
             x_next = dynamics_system(x_true, u)
-            
+
             # Next measurement
             if hasattr(dynamics_system, "continuous_time_system"):
                 y_next = dynamics_system.continuous_time_system.h(x_next)
             else:
                 y_next = dynamics_system.h(x_next)
-            
+
             # Evolve observer
             x_hat_next = observer_nn(x_hat, u, y_next)
-            
+
             # Next error
             e_next = x_next - x_hat_next
-            
+
             # Next augmented state
             states_next = torch.cat([x_next, e_next], dim=1)
             V_next = lyapunov_nn(states_next).squeeze()
-            
+
             # Lyapunov difference
             delta_V = V_next - V_current
-        
+
         # Reshape for plotting
         V_grid = V_current.reshape(grid_resolution, grid_resolution).cpu().numpy()
         delta_V_grid = delta_V.reshape(grid_resolution, grid_resolution).cpu().numpy()
-        
+
         # Row 1: V([x, e]) contours
         fig.add_trace(
             go.Contour(
@@ -800,25 +810,29 @@ def plot_lyapunov_2d_error_slices(
                 colorscale="Viridis",
                 showscale=(col == n_slices),
                 colorbar=dict(title="V([x,e])", x=1.02) if col == n_slices else None,
-                contours=dict(start=0, end=V_grid.max(), size=V_grid.max()/20),
+                contours=dict(start=0, end=V_grid.max(), size=V_grid.max() / 20),
             ),
-            row=1, col=col,
+            row=1,
+            col=col,
         )
-        
+
         # Add ROA boundary
         if rho is not None:
             fig.add_trace(
                 go.Contour(
-                    x=x0_range, y=x1_range, z=V_grid,
+                    x=x0_range,
+                    y=x1_range,
+                    z=V_grid,
                     contours=dict(start=rho, end=rho, size=1, coloring="none"),
                     line=dict(color="red", width=3),
                     showscale=False,
                     showlegend=(col == 1),
                     name=f"V=ρ",
                 ),
-                row=1, col=col,
+                row=1,
+                col=col,
             )
-        
+
         # Row 2: ΔV([x, e]) contours
         fig.add_trace(
             go.Contour(
@@ -831,25 +845,29 @@ def plot_lyapunov_2d_error_slices(
                 contours=dict(
                     start=delta_V_grid.min(),
                     end=delta_V_grid.max(),
-                    size=(delta_V_grid.max() - delta_V_grid.min())/20,
+                    size=(delta_V_grid.max() - delta_V_grid.min()) / 20,
                 ),
             ),
-            row=2, col=col,
+            row=2,
+            col=col,
         )
-        
+
         # Add ΔV=0 contour (stability boundary)
         fig.add_trace(
             go.Contour(
-                x=x0_range, y=x1_range, z=delta_V_grid,
+                x=x0_range,
+                y=x1_range,
+                z=delta_V_grid,
                 contours=dict(start=0, end=0, size=1, coloring="none"),
                 line=dict(color="black", width=3, dash="dash"),
                 showscale=False,
                 showlegend=(col == 1),
                 name="ΔV=0",
             ),
-            row=2, col=col,
+            row=2,
+            col=col,
         )
-        
+
         # Add equilibrium to both rows
         for row in [1, 2]:
             fig.add_trace(
@@ -860,37 +878,39 @@ def plot_lyapunov_2d_error_slices(
                     marker=dict(size=8, color="lime", symbol="star"),
                     showlegend=False,
                 ),
-                row=row, col=col,
+                row=row,
+                col=col,
             )
-    
+
     # Update axes
     if state_names is None:
         state_names = (f"x{idx0}", f"x{idx1}")
-    
+
     for col in range(1, n_slices + 1):
         fig.update_xaxes(title_text=state_names[0], row=1, col=col)
         fig.update_yaxes(title_text=state_names[1], row=1, col=col)
         fig.update_xaxes(title_text=state_names[0], row=2, col=col)
         fig.update_yaxes(title_text=state_names[1], row=2, col=col)
-    
+
     if title is None:
         title = f"Lyapunov Analysis: Impact of Estimation Error e_{error_dim}"
-    
+
     fig.update_layout(
         title=title,
         height=800,
         width=400 * n_slices,
         showlegend=True,
     )
-    
+
     if save_html:
         fig.write_html(save_html)
         print(f"Error slice visualization saved to {save_html}")
-    
+
     if show:
         fig.show()
-    
+
     return fig
+
 
 def plot_lyapunov_3d_surface(
     lyapunov_nn,
@@ -910,6 +930,7 @@ def plot_lyapunov_3d_surface(
     estimation_error: Optional[torch.Tensor] = None,
     trajectories: Optional[List[torch.Tensor]] = None,
     trajectory_colorscale: str = "Plotly",
+    surface_opacity: Optional[float] = None,
 ):
     """
     Plot Lyapunov function as a 3D surface, optionally with derivative surface and trajectories
@@ -935,6 +956,7 @@ def plot_lyapunov_3d_surface(
         trajectories: Optional list of trajectories (timesteps, state_dim) to overlay
         trajectory_colorscale: Plotly qualitative color sequence for trajectories
                               (e.g., "Plotly", "D3", "Vivid", "Dark24", "Set1")
+        surface_opacity: Opacity of the plotted 3D surfaces (default 0.5 with trajectories and 1.0 without)
 
     Returns:
         Plotly figure
@@ -948,6 +970,10 @@ def plot_lyapunov_3d_surface(
         else "cpu"
     )
     idx0, idx1 = state_indices
+
+    # Automatically adjust opacity if trajectories are present
+    if surface_opacity is None:
+        surface_opacity = 0.5 if trajectories is not None else 1.0
 
     # Prepare state grids
     (
@@ -1025,6 +1051,7 @@ def plot_lyapunov_3d_surface(
                 y=X1,
                 z=V_grid,
                 colorscale=colorscale,
+                opacity=surface_opacity,
                 name="V(x)",
                 colorbar=dict(title="V(x)", x=0.42, len=0.85, thickness=20),
                 hovertemplate="%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<br>V: %{z:.3f}<extra></extra>",
@@ -1040,6 +1067,7 @@ def plot_lyapunov_3d_surface(
                 y=X1,
                 z=V_dot_grid,
                 colorscale="RdBu_r",
+                opacity=surface_opacity,
                 name="ΔV(x)",
                 colorbar=dict(title="ΔV(x)", x=1.02, len=0.85, thickness=20),
                 hovertemplate="%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<br>ΔV: %{z:.3f}<extra></extra>",
@@ -1109,33 +1137,37 @@ def plot_lyapunov_3d_surface(
         # Add trajectories to both plots
         if trajectories is not None:
             import plotly.express as px
-            
+
             # Get the color sequence
             try:
                 color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
             except AttributeError:
-                print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+                print(
+                    f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead."
+                )
                 color_sequence = px.colors.qualitative.Plotly
-            
+
             for i, traj in enumerate(trajectories):
                 traj_np = traj.detach().cpu().numpy()
                 color = color_sequence[i % len(color_sequence)]
-                
+
                 # Compute V and ΔV along trajectory
                 with torch.no_grad():
                     # Prepare trajectory states for Lyapunov evaluation
-                    traj_physical = traj[:, :x_equilibrium.shape[0]]  # Extract physical states
-                    
+                    traj_physical = traj[
+                        :, : x_equilibrium.shape[0]
+                    ]  # Extract physical states
+
                     if observer_nn is not None:
                         # For output feedback, augment with zero estimation error
                         traj_error = torch.zeros_like(traj_physical)
                         traj_lyap = torch.cat([traj_physical, traj_error], dim=1)
                     else:
                         traj_lyap = traj_physical
-                    
+
                     # Compute V along trajectory
                     V_traj = lyapunov_nn(traj_lyap).squeeze().cpu().numpy()
-                    
+
                     # Compute ΔV along trajectory
                     V_traj_deriv, V_dot_traj = _compute_lyapunov_derivative(
                         traj_physical,
@@ -1144,10 +1176,17 @@ def plot_lyapunov_3d_surface(
                         observer_nn,
                         dynamics_system,
                         device,
-                        None if observer_nn is None else torch.zeros((traj_physical.shape[0], x_equilibrium.shape[0]), device=device),
+                        (
+                            None
+                            if observer_nn is None
+                            else torch.zeros(
+                                (traj_physical.shape[0], x_equilibrium.shape[0]),
+                                device=device,
+                            )
+                        ),
                     )
                     V_dot_traj_np = V_dot_traj.cpu().numpy()
-                
+
                 # Add trajectory to V(x) plot
                 fig.add_trace(
                     go.Scatter3d(
@@ -1163,7 +1202,7 @@ def plot_lyapunov_3d_surface(
                     row=1,
                     col=1,
                 )
-                
+
                 # Start point on V(x)
                 fig.add_trace(
                     go.Scatter3d(
@@ -1178,7 +1217,7 @@ def plot_lyapunov_3d_surface(
                     row=1,
                     col=1,
                 )
-                
+
                 # Add trajectory to ΔV(x) plot
                 fig.add_trace(
                     go.Scatter3d(
@@ -1193,7 +1232,7 @@ def plot_lyapunov_3d_surface(
                     row=1,
                     col=2,
                 )
-                
+
                 # Start point on ΔV(x)
                 fig.add_trace(
                     go.Scatter3d(
@@ -1236,7 +1275,7 @@ def plot_lyapunov_3d_surface(
             showlegend=True,
             margin=dict(l=50, r=50, t=80, b=50),
         )
-        
+
     else:
         # Single plot - just V(x)
         fig = go.Figure()
@@ -1248,6 +1287,7 @@ def plot_lyapunov_3d_surface(
                 y=X1,
                 z=V_grid,
                 colorscale=colorscale,
+                opacity=surface_opacity,
                 name="V(x)",
                 colorbar=dict(title="V(x)", thickness=20),
                 hovertemplate="%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<br>V: %{z:.3f}<extra></extra>",
@@ -1262,7 +1302,7 @@ def plot_lyapunov_3d_surface(
                     x=X0,
                     y=X1,
                     z=rho_plane,
-                    opacity=0.5,
+                    opacity=0.4,
                     colorscale=[[0, "red"], [1, "red"]],
                     showscale=False,
                     name=f"ROA (ρ={rho:.3f})",
@@ -1291,30 +1331,32 @@ def plot_lyapunov_3d_surface(
         # Add trajectories to single plot
         if trajectories is not None:
             import plotly.express as px
-            
+
             # Get the color sequence
             try:
                 color_sequence = getattr(px.colors.qualitative, trajectory_colorscale)
             except AttributeError:
-                print(f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead.")
+                print(
+                    f"Warning: Color sequence '{trajectory_colorscale}' not found. Using 'Plotly' instead."
+                )
                 color_sequence = px.colors.qualitative.Plotly
-            
+
             for i, traj in enumerate(trajectories):
                 traj_np = traj.detach().cpu().numpy()
                 color = color_sequence[i % len(color_sequence)]
-                
+
                 # Compute V along trajectory
                 with torch.no_grad():
-                    traj_physical = traj[:, :x_equilibrium.shape[0]]
-                    
+                    traj_physical = traj[:, : x_equilibrium.shape[0]]
+
                     if observer_nn is not None:
                         traj_error = torch.zeros_like(traj_physical)
                         traj_lyap = torch.cat([traj_physical, traj_error], dim=1)
                     else:
                         traj_lyap = traj_physical
-                    
+
                     V_traj = lyapunov_nn(traj_lyap).squeeze().cpu().numpy()
-                
+
                 # Trajectory line
                 fig.add_trace(
                     go.Scatter3d(
@@ -1327,7 +1369,7 @@ def plot_lyapunov_3d_surface(
                         hovertemplate=f"Traj {i+1}<br>V: %{{z:.3f}}<extra></extra>",
                     )
                 )
-                
+
                 # Start point
                 fig.add_trace(
                     go.Scatter3d(
@@ -1387,6 +1429,7 @@ def plot_lyapunov_3d_surface(
 
     return fig
 
+
 def plot_roa_vs_error(
     lyapunov_nn,
     controller_nn,
@@ -1404,13 +1447,13 @@ def plot_roa_vs_error(
 ):
     """
     Plot verified ROA boundary as a 3D surface in (physical_state, error) space
-    
+
     Shows the set of (x, e) where BOTH:
     - V([x, e]) ≤ ρ
     - ΔV([x, e]) ≤ 0 (computed with actual closed-loop dynamics)
-    
+
     This uses controller and observer to compute ΔV at each point.
-    
+
     Args:
         lyapunov_nn: Lyapunov function V([x, e])
         controller_nn: Controller u = π([x_hat, y])
@@ -1425,15 +1468,15 @@ def plot_roa_vs_error(
         title: Plot title
         save_html: Save path
         show: Display plot
-    
+
     Returns:
         Plotly 3D figure
     """
-    
+
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
     error_range = (to_float(error_range[0]), to_float(error_range[1]))
     device = next(lyapunov_nn.parameters()).device
-    
+
     # Get physical state dimension
     if hasattr(dynamics_system, "continuous_time_system"):
         nx = dynamics_system.continuous_time_system.nx
@@ -1441,48 +1484,52 @@ def plot_roa_vs_error(
     else:
         nx = dynamics_system.nx
         x_eq = dynamics_system.x_equilibrium.to(device)
-    
+
     # Create 2D grid: (physical_state[state_dim], error[error_dim])
     x_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
     e_range = np.linspace(error_range[0], error_range[1], grid_resolution)
     X_grid, E_grid = np.meshgrid(x_range, e_range)
-    
+
     n_points = grid_resolution * grid_resolution
-    
+
     # Build physical states (other dims at equilibrium)
     states_physical = x_eq.unsqueeze(0).expand(n_points, -1).clone()
-    states_physical[:, state_dim] = torch.tensor(X_grid.flatten(), dtype=torch.float32, device=device)
-    
+    states_physical[:, state_dim] = torch.tensor(
+        X_grid.flatten(), dtype=torch.float32, device=device
+    )
+
     # Build estimation errors (other dims at zero)
     estimation_errors = torch.zeros((n_points, nx), device=device)
-    estimation_errors[:, error_dim] = torch.tensor(E_grid.flatten(), dtype=torch.float32, device=device)
-    
+    estimation_errors[:, error_dim] = torch.tensor(
+        E_grid.flatten(), dtype=torch.float32, device=device
+    )
+
     # Augmented states [x, e]
     states_augmented = torch.cat([states_physical, estimation_errors], dim=1)
-    
+
     # Compute V and ΔV using actual closed-loop dynamics
     with torch.no_grad():
         # Current V([x, e])
         V_current = lyapunov_nn(states_augmented).squeeze()
-        
+
         # Compute ΔV using controller and observer
         x_true = states_augmented[:, :nx]
         e_current = states_augmented[:, nx:]
         x_hat = x_true - e_current
-        
+
         # Get measurement
         if hasattr(dynamics_system, "continuous_time_system"):
             y = dynamics_system.continuous_time_system.h(x_true)
         else:
             y = dynamics_system.h(x_true)
-        
+
         # Controller input (auto-detect augmentation)
         controller_in_dim = None
         if hasattr(controller_nn, "net"):
             controller_in_dim = controller_nn.net[0].in_features
         elif hasattr(controller_nn, "x_equilibrium"):
             controller_in_dim = controller_nn.x_equilibrium.shape[0]
-        
+
         if controller_in_dim is not None and x_hat.shape[1] < controller_in_dim:
             deficit = controller_in_dim - x_hat.shape[1]
             if deficit == y.shape[1]:
@@ -1492,44 +1539,46 @@ def plot_roa_vs_error(
                 controller_input = torch.cat([x_hat, padding], dim=1)
         else:
             controller_input = x_hat
-        
+
         # Compute control
         u = controller_nn(controller_input)
-        
+
         # Evolve physical state
         x_next = dynamics_system(x_true, u)
-        
+
         # Next measurement
         if hasattr(dynamics_system, "continuous_time_system"):
             y_next = dynamics_system.continuous_time_system.h(x_next)
         else:
             y_next = dynamics_system.h(x_next)
-        
+
         # Evolve observer
         x_hat_next = observer_nn(x_hat, u, y_next)
-        
+
         # Next error
         e_next = x_next - x_hat_next
-        
+
         # Next augmented state
         states_next = torch.cat([x_next, e_next], dim=1)
         V_next = lyapunov_nn(states_next).squeeze()
-        
+
         # Lyapunov difference
         delta_V = V_next - V_current
-    
+
     # Reshape for plotting
     V_grid = V_current.reshape(grid_resolution, grid_resolution).cpu().numpy()
     delta_V_grid = delta_V.reshape(grid_resolution, grid_resolution).cpu().numpy()
-    
+
     # Create masks for different regions
     in_roa = (V_current <= rho).reshape(grid_resolution, grid_resolution).cpu().numpy()
-    is_decreasing = (delta_V <= 0).reshape(grid_resolution, grid_resolution).cpu().numpy()
+    is_decreasing = (
+        (delta_V <= 0).reshape(grid_resolution, grid_resolution).cpu().numpy()
+    )
     verified_roa = in_roa & is_decreasing
-    
+
     # Create figure with multiple surfaces
     fig = go.Figure()
-    
+
     # 1. V([x, e]) surface
     fig.add_trace(
         go.Surface(
@@ -1541,11 +1590,11 @@ def plot_roa_vs_error(
             opacity=0.7,
             colorbar=dict(title="V([x,e])", x=0.45, len=0.8),
             hovertemplate=f"x_{state_dim}: %{{x:.3f}}<br>"
-                         f"e_{error_dim}: %{{y:.3f}}<br>"
-                         f"V: %{{z:.3f}}<extra></extra>",
+            f"e_{error_dim}: %{{y:.3f}}<br>"
+            f"V: %{{z:.3f}}<extra></extra>",
         )
     )
-    
+
     # 2. ROA threshold plane
     rho_plane = np.full_like(V_grid, rho)
     fig.add_trace(
@@ -1560,7 +1609,7 @@ def plot_roa_vs_error(
             hovertemplate=f"ρ = {rho:.3f}<extra></extra>",
         )
     )
-    
+
     # 3. Highlight e=0 slice (ideal behavior)
     e_zero_idx = np.argmin(np.abs(e_range))
     fig.add_trace(
@@ -1574,19 +1623,19 @@ def plot_roa_vs_error(
             hovertemplate="Ideal behavior (e=0)<extra></extra>",
         )
     )
-    
+
     # 4. Show where ΔV > 0 (violations) as scatter points
     violation_mask = (V_current <= rho) & (delta_V > 0)
     if violation_mask.any():
         violation_indices = torch.where(violation_mask)[0]
         # Sample violations to avoid too many points
         if len(violation_indices) > 1000:
-            violation_indices = violation_indices[::len(violation_indices)//1000]
-        
+            violation_indices = violation_indices[:: len(violation_indices) // 1000]
+
         x_viol = states_physical[violation_indices, state_dim].cpu().numpy()
         e_viol = estimation_errors[violation_indices, error_dim].cpu().numpy()
         V_viol = V_current[violation_indices].cpu().numpy()
-        
+
         fig.add_trace(
             go.Scatter3d(
                 x=x_viol,
@@ -1598,10 +1647,10 @@ def plot_roa_vs_error(
                 hovertemplate="Violation: V≤ρ but ΔV>0<extra></extra>",
             )
         )
-    
+
     if title is None:
         title = f"ROA vs Estimation Error: x_{state_dim} and e_{error_dim}"
-    
+
     fig.update_layout(
         title=title,
         scene=dict(
@@ -1614,15 +1663,16 @@ def plot_roa_vs_error(
         width=1000,
         showlegend=True,
     )
-    
+
     if save_html:
         fig.write_html(save_html)
         print(f"ROA vs error 3D plot saved to {save_html}")
-    
+
     if show:
         fig.show()
-    
+
     return fig
+
 
 def create_roa_error_animation(
     lyapunov_nn,
@@ -1642,15 +1692,15 @@ def create_roa_error_animation(
 ):
     """
     Create animated visualization showing how verified ROA changes with estimation error
-    
+
     Each frame shows the physical state space with:
     - V([x, e]) contours
     - ROA boundary (V = ρ)
     - Stability boundary (ΔV = 0)
     - Verified ROA (shaded region where both conditions hold)
-    
+
     Uses controller and observer to compute actual closed-loop ΔV.
-    
+
     Args:
         lyapunov_nn: Lyapunov function V([x, e])
         controller_nn: Controller
@@ -1666,16 +1716,16 @@ def create_roa_error_animation(
         grid_resolution: Grid density
         save_html: Save path
         show: Display plot
-    
+
     Returns:
         Plotly figure with animation
     """
-    
+
     state_limits = tuple((to_float(lim[0]), to_float(lim[1])) for lim in state_limits)
     error_range = (to_float(error_range[0]), to_float(error_range[1]))
     device = next(lyapunov_nn.parameters()).device
     idx0, idx1 = state_indices
-    
+
     # Get physical state dimension
     if hasattr(dynamics_system, "continuous_time_system"):
         nx = dynamics_system.continuous_time_system.nx
@@ -1683,64 +1733,68 @@ def create_roa_error_animation(
     else:
         nx = dynamics_system.nx
         x_eq = dynamics_system.x_equilibrium.to(device)
-    
+
     # Create physical state grid
     x0_range = np.linspace(state_limits[0][0], state_limits[0][1], grid_resolution)
     x1_range = np.linspace(state_limits[1][0], state_limits[1][1], grid_resolution)
     X0, X1 = np.meshgrid(x0_range, x1_range)
-    
+
     n_points = grid_resolution * grid_resolution
     states_physical = torch.zeros((n_points, nx), device=device)
-    states_physical[:, idx0] = torch.tensor(X0.flatten(), dtype=torch.float32, device=device)
-    states_physical[:, idx1] = torch.tensor(X1.flatten(), dtype=torch.float32, device=device)
-    
+    states_physical[:, idx0] = torch.tensor(
+        X0.flatten(), dtype=torch.float32, device=device
+    )
+    states_physical[:, idx1] = torch.tensor(
+        X1.flatten(), dtype=torch.float32, device=device
+    )
+
     # Set other physical dimensions to equilibrium
     for i in range(nx):
         if i not in state_indices:
             states_physical[:, i] = x_eq[i]
-    
+
     # Generate error values for animation
     error_values = np.linspace(error_range[0], error_range[1], n_frames)
-    
+
     # Precompute V, ΔV, and verified ROA for all error values
     frames_V = []
     frames_delta_V = []
     frames_verified = []
-    
+
     print(f"Precomputing {n_frames} frames...")
     for frame_idx, error_val in enumerate(error_values):
         if frame_idx % 5 == 0:
             print(f"  Frame {frame_idx+1}/{n_frames} (e={error_val:.3f})")
-        
+
         # Create estimation error
         estimation_error = torch.zeros((n_points, nx), device=device)
         estimation_error[:, error_dim] = error_val
-        
+
         # Augmented state
         states_augmented = torch.cat([states_physical, estimation_error], dim=1)
-        
+
         # Compute V and ΔV with actual dynamics
         with torch.no_grad():
             V_current = lyapunov_nn(states_augmented).squeeze()
-            
+
             # Compute ΔV using closed-loop dynamics
             x_true = states_augmented[:, :nx]
             e_current = states_augmented[:, nx:]
             x_hat = x_true - e_current
-            
+
             # Get measurement
             if hasattr(dynamics_system, "continuous_time_system"):
                 y = dynamics_system.continuous_time_system.h(x_true)
             else:
                 y = dynamics_system.h(x_true)
-            
+
             # Controller input (auto-detect augmentation)
             controller_in_dim = None
             if hasattr(controller_nn, "net"):
                 controller_in_dim = controller_nn.net[0].in_features
             elif hasattr(controller_nn, "x_equilibrium"):
                 controller_in_dim = controller_nn.x_equilibrium.shape[0]
-            
+
             if controller_in_dim is not None and x_hat.shape[1] < controller_in_dim:
                 deficit = controller_in_dim - x_hat.shape[1]
                 if deficit == y.shape[1]:
@@ -1750,51 +1804,51 @@ def create_roa_error_animation(
                     controller_input = torch.cat([x_hat, padding], dim=1)
             else:
                 controller_input = x_hat
-            
+
             # Compute control
             u = controller_nn(controller_input)
-            
+
             # Evolve physical state
             x_next = dynamics_system(x_true, u)
-            
+
             # Next measurement
             if hasattr(dynamics_system, "continuous_time_system"):
                 y_next = dynamics_system.continuous_time_system.h(x_next)
             else:
                 y_next = dynamics_system.h(x_next)
-            
+
             # Evolve observer
             x_hat_next = observer_nn(x_hat, u, y_next)
-            
+
             # Next error
             e_next = x_next - x_hat_next
-            
+
             # Next augmented state
             states_next = torch.cat([x_next, e_next], dim=1)
             V_next = lyapunov_nn(states_next).squeeze()
-            
+
             # Lyapunov difference
             delta_V = V_next - V_current
-        
+
         # Reshape
         V_grid = V_current.reshape(grid_resolution, grid_resolution).cpu().numpy()
         delta_V_grid = delta_V.reshape(grid_resolution, grid_resolution).cpu().numpy()
-        
+
         # Compute verified ROA (both conditions)
         in_roa = (V_current <= rho).cpu().numpy()
         is_decreasing = (delta_V <= 0).cpu().numpy()
         verified = (in_roa & is_decreasing).reshape(grid_resolution, grid_resolution)
-        
+
         frames_V.append(V_grid)
         frames_delta_V.append(delta_V_grid)
         frames_verified.append(verified)
-    
+
     print("Creating animation...")
-    
+
     # Create initial frame
     if state_names is None:
         state_names = (f"x{idx0}", f"x{idx1}")
-    
+
     # Initial traces
     initial_traces = [
         # V contours
@@ -1846,12 +1900,13 @@ def create_roa_error_animation(
             x=[x_eq[idx0].cpu().item()],
             y=[x_eq[idx1].cpu().item()],
             mode="markers",
-            marker=dict(size=12, color="lime", symbol="star",
-                       line=dict(width=2, color="black")),
+            marker=dict(
+                size=12, color="lime", symbol="star", line=dict(width=2, color="black")
+            ),
             name="Equilibrium",
         ),
     ]
-    
+
     # Create frames for animation
     animation_frames = []
     for frame_idx, (e_val, V_frame, dV_frame, verified_frame) in enumerate(
@@ -1862,17 +1917,23 @@ def create_roa_error_animation(
                 data=[
                     go.Contour(x=x0_range, y=x1_range, z=V_frame),
                     go.Contour(
-                        x=x0_range, y=x1_range, z=V_frame,
+                        x=x0_range,
+                        y=x1_range,
+                        z=V_frame,
                         contours=dict(start=rho, end=rho, size=1, coloring="none"),
                         line=dict(color="red", width=4),
                     ),
                     go.Contour(
-                        x=x0_range, y=x1_range, z=dV_frame,
+                        x=x0_range,
+                        y=x1_range,
+                        z=dV_frame,
                         contours=dict(start=0, end=0, size=1, coloring="none"),
                         line=dict(color="orange", width=3, dash="dash"),
                     ),
                     go.Contour(
-                        x=x0_range, y=x1_range, z=verified_frame.astype(float),
+                        x=x0_range,
+                        y=x1_range,
+                        z=verified_frame.astype(float),
                         contours=dict(start=0.5, end=0.5, size=1, coloring="heatmap"),
                         colorscale=[[0, "rgba(0,255,0,0)"], [1, "rgba(0,255,0,0.3)"]],
                     ),
@@ -1887,8 +1948,10 @@ def create_roa_error_animation(
                     annotations=[
                         dict(
                             text=f"e_{error_dim} = {e_val:.3f}",
-                            x=0.5, y=1.05,
-                            xref="paper", yref="paper",
+                            x=0.5,
+                            y=1.05,
+                            xref="paper",
+                            yref="paper",
                             showarrow=False,
                             font=dict(size=16, color="black"),
                         )
@@ -1896,13 +1959,13 @@ def create_roa_error_animation(
                 ),
             )
         )
-    
+
     fig = go.Figure(data=initial_traces, frames=animation_frames)
-    
+
     # Add animation controls
     fig.update_layout(
         title=f"Verified ROA Evolution with Estimation Error e_{error_dim}<br>"
-              f"<sub>Green: Verified ROA (V≤ρ AND ΔV≤0) | Red: V=ρ | Orange: ΔV=0</sub>",
+        f"<sub>Green: Verified ROA (V≤ρ AND ΔV≤0) | Red: V=ρ | Orange: ΔV=0</sub>",
         xaxis_title=state_names[0],
         yaxis_title=state_names[1],
         updatemenus=[
@@ -1913,22 +1976,31 @@ def create_roa_error_animation(
                     dict(
                         label="▶ Play",
                         method="animate",
-                        args=[None, {
-                            "frame": {"duration": 300, "redraw": True},
-                            "fromcurrent": True,
-                            "mode": "immediate",
-                        }],
+                        args=[
+                            None,
+                            {
+                                "frame": {"duration": 300, "redraw": True},
+                                "fromcurrent": True,
+                                "mode": "immediate",
+                            },
+                        ],
                     ),
                     dict(
                         label="⏸ Pause",
                         method="animate",
-                        args=[[None], {
-                            "frame": {"duration": 0, "redraw": False},
-                            "mode": "immediate",
-                        }],
+                        args=[
+                            [None],
+                            {
+                                "frame": {"duration": 0, "redraw": False},
+                                "mode": "immediate",
+                            },
+                        ],
                     ),
                 ],
-                x=0.1, y=1.15, xanchor="left", yanchor="top",
+                x=0.1,
+                y=1.15,
+                xanchor="left",
+                yanchor="top",
             )
         ],
         sliders=[
@@ -1948,8 +2020,10 @@ def create_roa_error_animation(
                     )
                     for e_val in error_values
                 ],
-                x=0.1, xanchor="left",
-                y=0, yanchor="top",
+                x=0.1,
+                xanchor="left",
+                y=0,
+                yanchor="top",
                 currentvalue=dict(
                     prefix=f"e_{error_dim} = ",
                     visible=True,
@@ -1962,12 +2036,12 @@ def create_roa_error_animation(
         height=700,
         width=900,
     )
-    
+
     if save_html:
         fig.write_html(save_html)
         print(f"Animated ROA vs error saved to {save_html}")
-    
+
     if show:
         fig.show()
-    
+
     return fig
