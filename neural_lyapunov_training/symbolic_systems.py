@@ -333,6 +333,7 @@ class SymbolicQuadrotor2D(SymbolicDynamicalSystem):
         """For backward compatibility"""
         return self.gravity_val
 
+
 class SymbolicQuadrotor2DLidar(SymbolicDynamicalSystem):
     """
     Symbolic representation of a planar (2D) quadrotor with lidar-based partial observations.

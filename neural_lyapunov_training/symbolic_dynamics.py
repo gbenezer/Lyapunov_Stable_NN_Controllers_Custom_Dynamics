@@ -455,7 +455,7 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
     def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """
         Evaluate continuous-time dynamics: compute state derivative dx/dt = f(x, u)
-    
+
         **CRITICAL DISTINCTION**: This method returns the DERIVATIVE (rate of change)
         of the state, NOT the next state value. This is fundamentally different from
         discrete-time systems.
@@ -788,11 +788,11 @@ class SymbolicDynamicalSystem(ABC, nn.Module):
     ) -> Dict[str, Union[bool, float]]:
         """
         Verify symbolic Jacobians against numerical finite differences
-    
+
         Checks:
         - A_match: Does ∂f/∂x from SymPy match autograd?
         - B_match: Does ∂f/∂u from SymPy match autograd?
-        
+
         Use for:
         - Debugging symbolic derivations after system modifications
         - Ensuring code generation correctness
@@ -1472,7 +1472,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         """
 
         Compute next state: x[k+1] = discrete_dynamics(x, u[k])
-    
+
         **CRITICAL DISTINCTION**: This method returns the NEXT STATE x[k+1], NOT
         the derivative dx/dt.
 
@@ -2533,7 +2533,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         control_sequence: Optional[torch.Tensor] = None,
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
-        colorway: Union[str, List[str]] = 'Plotly',
+        colorway: Union[str, List[str]] = "Plotly",
         compact: bool = False,
         aspect_ratio: float = 1.5,
         max_height: Optional[int] = None,
@@ -2551,8 +2551,8 @@ class GenericDiscreteTimeSystem(nn.Module):
             title: Plot title
             trajectory_names: Optional names for each trajectory (uses "Trajectory 1", etc. if None)
             colorway: Plotly color sequence name or list of colors. Options:
-                    'Plotly' (default), 'D3', 'G10', 'T10', 'Alphabet', 
-                    'Dark24', 'Light24', 'Set1', 'Pastel', 'Vivid', 
+                    'Plotly' (default), 'D3', 'G10', 'T10', 'Alphabet',
+                    'Dark24', 'Light24', 'Set1', 'Pastel', 'Vivid',
                     or a custom list of color strings
             compact: If True, use smaller subplots for many variables (default: False)
             aspect_ratio: Target width:height ratio per subplot (default: 1.5)
@@ -2579,16 +2579,16 @@ class GenericDiscreteTimeSystem(nn.Module):
         if isinstance(colorway, str):
             # Map string names to Plotly color sequences
             color_sequences = {
-                'Plotly': px.colors.qualitative.Plotly,
-                'D3': px.colors.qualitative.D3,
-                'G10': px.colors.qualitative.G10,
-                'T10': px.colors.qualitative.T10,
-                'Alphabet': px.colors.qualitative.Alphabet,
-                'Dark24': px.colors.qualitative.Dark24,
-                'Light24': px.colors.qualitative.Light24,
-                'Set1': px.colors.qualitative.Set1,
-                'Pastel': px.colors.qualitative.Pastel,
-                'Vivid': px.colors.qualitative.Vivid,
+                "Plotly": px.colors.qualitative.Plotly,
+                "D3": px.colors.qualitative.D3,
+                "G10": px.colors.qualitative.G10,
+                "T10": px.colors.qualitative.T10,
+                "Alphabet": px.colors.qualitative.Alphabet,
+                "Dark24": px.colors.qualitative.Dark24,
+                "Light24": px.colors.qualitative.Light24,
+                "Set1": px.colors.qualitative.Set1,
+                "Pastel": px.colors.qualitative.Pastel,
+                "Vivid": px.colors.qualitative.Vivid,
             }
             colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
         else:
@@ -2620,7 +2620,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                 cols = int(np.ceil(np.sqrt(n * 1.5)))
                 rows = int(np.ceil(n / cols))
                 return rows, cols
-        
+
         rows, cols = calculate_subplot_layout(num_plots)
 
         # Adaptive figure dimensions
@@ -2639,36 +2639,38 @@ class GenericDiscreteTimeSystem(nn.Module):
                     base_subplot_height = 300
                 else:
                     base_subplot_height = 280
-                
+
                 base_subplot_width = base_subplot_height * aspect
-            
+
             # Calculate total dimensions
             height = int(rows * base_subplot_height)
             width = int(cols * base_subplot_width)
-            
+
             # Apply caps
             if max_height is not None:
                 height = min(height, max_height)
             else:
                 # Default max based on typical screen heights
                 height = min(height, 1400)
-            
+
             if max_width is not None:
                 width = min(width, max_width)
             else:
                 # Default max based on typical screen widths
                 width = min(width, 1800)
-            
+
             return width, height
-        
-        fig_width, fig_height = calculate_figure_dimensions(rows, cols, compact, aspect_ratio)
+
+        fig_width, fig_height = calculate_figure_dimensions(
+            rows, cols, compact, aspect_ratio
+        )
 
         # Adaptive spacing based on layout
         if rows > 3:
             vertical_spacing = 0.15
         else:
             vertical_spacing = 0.12
-        
+
         if cols > 3:
             horizontal_spacing = 0.08
         else:
@@ -2684,8 +2686,8 @@ class GenericDiscreteTimeSystem(nn.Module):
             subplot_titles.extend(control_names)
 
         fig = make_subplots(
-            rows=rows, 
-            cols=cols, 
+            rows=rows,
+            cols=cols,
             subplot_titles=subplot_titles,
             vertical_spacing=vertical_spacing,
             horizontal_spacing=horizontal_spacing,
@@ -2713,7 +2715,7 @@ class GenericDiscreteTimeSystem(nn.Module):
             for b in range(batch_size):
                 # Use same color for same trajectory across all subplots
                 color = colors[b % len(colors)]
-                
+
                 # Create trajectory name
                 if batch_size > 1:
                     if trajectory_names is not None:
@@ -2722,7 +2724,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                         traj_name = f"Trajectory {b+1}"
                 else:
                     traj_name = state_names[i]
-                
+
                 fig.add_trace(
                     go.Scatter(
                         x=time_steps,
@@ -2738,15 +2740,15 @@ class GenericDiscreteTimeSystem(nn.Module):
                 )
 
             fig.update_xaxes(
-                title_text="Time (s)", 
-                row=row, 
+                title_text="Time (s)",
+                row=row,
                 col=col,
                 title_font=dict(size=axis_font_size),
                 tickfont=dict(size=tick_font_size),
             )
             fig.update_yaxes(
-                title_text=state_names[i], 
-                row=row, 
+                title_text=state_names[i],
+                row=row,
                 col=col,
                 title_font=dict(size=axis_font_size),
                 tickfont=dict(size=tick_font_size),
@@ -2764,7 +2766,7 @@ class GenericDiscreteTimeSystem(nn.Module):
 
                 for b in range(batch_size):
                     color = colors[b % len(colors)]
-                    
+
                     if batch_size > 1:
                         if trajectory_names is not None:
                             traj_name = trajectory_names[b]
@@ -2772,7 +2774,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                             traj_name = f"Trajectory {b+1}"
                     else:
                         traj_name = f"u{i}"
-                    
+
                     fig.add_trace(
                         go.Scatter(
                             x=control_time,
@@ -2788,15 +2790,15 @@ class GenericDiscreteTimeSystem(nn.Module):
                     )
 
                 fig.update_xaxes(
-                    title_text="Time (s)", 
-                    row=row, 
+                    title_text="Time (s)",
+                    row=row,
                     col=col,
                     title_font=dict(size=axis_font_size),
                     tickfont=dict(size=tick_font_size),
                 )
                 fig.update_yaxes(
-                    title_text=f"u{i}", 
-                    row=row, 
+                    title_text=f"u{i}",
+                    row=row,
                     col=col,
                     title_font=dict(size=axis_font_size),
                     tickfont=dict(size=tick_font_size),
@@ -2813,7 +2815,7 @@ class GenericDiscreteTimeSystem(nn.Module):
             ),
             width=fig_width,
             height=fig_height,
-            showlegend=True, 
+            showlegend=True,
             hovermode="x unified",
             font=dict(size=tick_font_size),
         )
@@ -2825,14 +2827,16 @@ class GenericDiscreteTimeSystem(nn.Module):
         # Save if requested
         if save_html:
             fig.write_html(save_html)
-            print(f"Interactive plot saved to {save_html} (size: {fig_width}x{fig_height}px)")
+            print(
+                f"Interactive plot saved to {save_html} (size: {fig_width}x{fig_height}px)"
+            )
 
         # Show if requested
         if show:
             fig.show()
 
         return fig
-    
+
     def plot_trajectory_3d(
         self,
         trajectory: torch.Tensor,
@@ -2840,7 +2844,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         state_names: Optional[Tuple[str, str, str]] = None,
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
-        colorway: Union[str, List[str]] = 'Plotly',
+        colorway: Union[str, List[str]] = "Plotly",
         save_html: Optional[str] = None,
         show: bool = True,
         show_markers: bool = True,
@@ -2885,16 +2889,16 @@ class GenericDiscreteTimeSystem(nn.Module):
         # Get color sequence
         if isinstance(colorway, str):
             color_sequences = {
-                'Plotly': px.colors.qualitative.Plotly,
-                'D3': px.colors.qualitative.D3,
-                'G10': px.colors.qualitative.G10,
-                'T10': px.colors.qualitative.T10,
-                'Alphabet': px.colors.qualitative.Alphabet,
-                'Dark24': px.colors.qualitative.Dark24,
-                'Light24': px.colors.qualitative.Light24,
-                'Set1': px.colors.qualitative.Set1,
-                'Pastel': px.colors.qualitative.Pastel,
-                'Vivid': px.colors.qualitative.Vivid,
+                "Plotly": px.colors.qualitative.Plotly,
+                "D3": px.colors.qualitative.D3,
+                "G10": px.colors.qualitative.G10,
+                "T10": px.colors.qualitative.T10,
+                "Alphabet": px.colors.qualitative.Alphabet,
+                "Dark24": px.colors.qualitative.Dark24,
+                "Light24": px.colors.qualitative.Light24,
+                "Set1": px.colors.qualitative.Set1,
+                "Pastel": px.colors.qualitative.Pastel,
+                "Vivid": px.colors.qualitative.Vivid,
             }
             colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
         else:
@@ -2911,46 +2915,67 @@ class GenericDiscreteTimeSystem(nn.Module):
         time_steps = np.arange(T) * self.dt
 
         # Different colormaps for each trajectory
-        colormaps = ['Viridis', 'Plasma', 'Inferno', 'Magma', 'Cividis', 
-                     'Turbo', 'Blues', 'Greens', 'Reds', 'Purples']
+        colormaps = [
+            "Viridis",
+            "Plasma",
+            "Inferno",
+            "Magma",
+            "Cividis",
+            "Turbo",
+            "Blues",
+            "Greens",
+            "Reds",
+            "Purples",
+        ]
 
         # Plot each trajectory
         for b in range(batch_size):
             color = colors[b % len(colors)]
             colormap = colormaps[b % len(colormaps)]
-            
+
             if trajectory_names is not None:
                 traj_name = trajectory_names[b]
             else:
                 traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
-            
+
             # Main trajectory line with time-based color gradient
             # Use different colormap for each trajectory to distinguish them
             mode = "lines+markers" if show_markers else "lines"
-            
+
             # For single trajectory, use time coloring with colorbar
             # For multiple trajectories, use solid colors to distinguish
             if batch_size == 1:
                 line_config = dict(
-                    width=line_width, 
+                    width=line_width,
                     color=time_steps,
                     colorscale=colormap,
                     showscale=True,
                     colorbar=dict(
                         title="Time (s)",
                         x=1.02,
-                        xanchor='left',
+                        xanchor="left",
                         len=0.75,
                         y=0.5,
-                        yanchor='middle',
+                        yanchor="middle",
                     ),
                 )
-                marker_config = dict(size=marker_size, color=time_steps, colorscale=colormap, showscale=False) if show_markers else None
+                marker_config = (
+                    dict(
+                        size=marker_size,
+                        color=time_steps,
+                        colorscale=colormap,
+                        showscale=False,
+                    )
+                    if show_markers
+                    else None
+                )
             else:
                 # Multiple trajectories: use solid colors for clarity
                 line_config = dict(width=line_width, color=color)
-                marker_config = dict(size=marker_size, color=color) if show_markers else None
-            
+                marker_config = (
+                    dict(size=marker_size, color=color) if show_markers else None
+                )
+
             fig.add_trace(
                 go.Scatter3d(
                     x=traj_np[b, :, idx0],
@@ -2962,10 +2987,10 @@ class GenericDiscreteTimeSystem(nn.Module):
                     marker=marker_config,
                     legendgroup=f"traj_{b}",
                     hovertemplate=f"<b>{traj_name}</b><br>"
-                                  f"{state_names[0]}: %{{x:.4f}}<br>"
-                                  f"{state_names[1]}: %{{y:.4f}}<br>"
-                                  f"{state_names[2]}: %{{z:.4f}}<br>"
-                                  f"Time: %{{text:.3f}}s<extra></extra>",
+                    f"{state_names[0]}: %{{x:.4f}}<br>"
+                    f"{state_names[1]}: %{{y:.4f}}<br>"
+                    f"{state_names[2]}: %{{z:.4f}}<br>"
+                    f"Time: %{{text:.3f}}s<extra></extra>",
                     text=time_steps,
                 )
             )
@@ -3027,9 +3052,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                 xaxis_title=state_names[0],
                 yaxis_title=state_names[1],
                 zaxis_title=state_names[2],
-                camera=dict(
-                    eye=dict(x=1.5, y=1.5, z=1.3)
-                ),
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.3)),
             ),
             hovermode="closest",
             width=1000,
@@ -3037,10 +3060,10 @@ class GenericDiscreteTimeSystem(nn.Module):
             legend=dict(
                 x=0.02,
                 y=0.98,
-                xanchor='left',
-                yanchor='top',
-                bgcolor='rgba(255, 255, 255, 0.8)',
-                bordercolor='rgba(0, 0, 0, 0.3)',
+                xanchor="left",
+                yanchor="top",
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="rgba(0, 0, 0, 0.3)",
                 borderwidth=1,
             ),
         )
@@ -3054,7 +3077,6 @@ class GenericDiscreteTimeSystem(nn.Module):
 
         return fig
 
-
     def plot_phase_portrait_2d(
         self,
         trajectory: torch.Tensor,
@@ -3062,7 +3084,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         state_names: Optional[Tuple[str, str]] = None,
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
-        colorway: Union[str, List[str]] = 'Plotly',
+        colorway: Union[str, List[str]] = "Plotly",
         save_html: Optional[str] = None,
         show: bool = True,
     ):
@@ -3092,16 +3114,16 @@ class GenericDiscreteTimeSystem(nn.Module):
         # Get color sequence
         if isinstance(colorway, str):
             color_sequences = {
-                'Plotly': px.colors.qualitative.Plotly,
-                'D3': px.colors.qualitative.D3,
-                'G10': px.colors.qualitative.G10,
-                'T10': px.colors.qualitative.T10,
-                'Alphabet': px.colors.qualitative.Alphabet,
-                'Dark24': px.colors.qualitative.Dark24,
-                'Light24': px.colors.qualitative.Light24,
-                'Set1': px.colors.qualitative.Set1,
-                'Pastel': px.colors.qualitative.Pastel,
-                'Vivid': px.colors.qualitative.Vivid,
+                "Plotly": px.colors.qualitative.Plotly,
+                "D3": px.colors.qualitative.D3,
+                "G10": px.colors.qualitative.G10,
+                "T10": px.colors.qualitative.T10,
+                "Alphabet": px.colors.qualitative.Alphabet,
+                "Dark24": px.colors.qualitative.Dark24,
+                "Light24": px.colors.qualitative.Light24,
+                "Set1": px.colors.qualitative.Set1,
+                "Pastel": px.colors.qualitative.Pastel,
+                "Vivid": px.colors.qualitative.Vivid,
             }
             colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
         else:
@@ -3116,12 +3138,12 @@ class GenericDiscreteTimeSystem(nn.Module):
         # First: Add all trajectory lines
         for b in range(batch_size):
             color = colors[b % len(colors)]
-            
+
             if trajectory_names is not None:
                 traj_name = trajectory_names[b]
             else:
                 traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
-            
+
             fig.add_trace(
                 go.Scatter(
                     x=traj_np[b, :, idx0],
@@ -3194,7 +3216,7 @@ class GenericDiscreteTimeSystem(nn.Module):
             fig.show()
 
         return fig
-    
+
     def plot_phase_portrait_3d(
         self,
         trajectory: torch.Tensor,
@@ -3202,7 +3224,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         state_names: Optional[Tuple[str, str, str]] = None,
         title: Optional[str] = None,
         trajectory_names: Optional[List[str]] = None,
-        colorway: Union[str, List[str]] = 'Plotly',
+        colorway: Union[str, List[str]] = "Plotly",
         save_html: Optional[str] = None,
         show: bool = True,
         show_time_markers: bool = False,
@@ -3229,7 +3251,7 @@ class GenericDiscreteTimeSystem(nn.Module):
         Example:
             >>> # Compare multiple trajectories in phase space
             >>> trajs = torch.stack([traj_ic1, traj_ic2, traj_ic3])
-            >>> system.plot_phase_portrait_3d(trajs, 
+            >>> system.plot_phase_portrait_3d(trajs,
             ...     state_indices=(0, 2, 4),
             ...     state_names=('x', 'theta', 'v_x'),
             ...     trajectory_names=['Stable', 'Limit Cycle', 'Divergent'])
@@ -3247,16 +3269,16 @@ class GenericDiscreteTimeSystem(nn.Module):
         # Get color sequence
         if isinstance(colorway, str):
             color_sequences = {
-                'Plotly': px.colors.qualitative.Plotly,
-                'D3': px.colors.qualitative.D3,
-                'G10': px.colors.qualitative.G10,
-                'T10': px.colors.qualitative.T10,
-                'Alphabet': px.colors.qualitative.Alphabet,
-                'Dark24': px.colors.qualitative.Dark24,
-                'Light24': px.colors.qualitative.Light24,
-                'Set1': px.colors.qualitative.Set1,
-                'Pastel': px.colors.qualitative.Pastel,
-                'Vivid': px.colors.qualitative.Vivid,
+                "Plotly": px.colors.qualitative.Plotly,
+                "D3": px.colors.qualitative.D3,
+                "G10": px.colors.qualitative.G10,
+                "T10": px.colors.qualitative.T10,
+                "Alphabet": px.colors.qualitative.Alphabet,
+                "Dark24": px.colors.qualitative.Dark24,
+                "Light24": px.colors.qualitative.Light24,
+                "Set1": px.colors.qualitative.Set1,
+                "Pastel": px.colors.qualitative.Pastel,
+                "Vivid": px.colors.qualitative.Vivid,
             }
             colors = color_sequences.get(colorway, px.colors.qualitative.Plotly)
         else:
@@ -3274,12 +3296,12 @@ class GenericDiscreteTimeSystem(nn.Module):
         # Plot each trajectory
         for b in range(batch_size):
             color = colors[b % len(colors)]
-            
+
             if trajectory_names is not None:
                 traj_name = trajectory_names[b]
             else:
                 traj_name = f"Trajectory {b+1}" if batch_size > 1 else "Trajectory"
-            
+
             # Main trajectory line (solid color)
             fig.add_trace(
                 go.Scatter3d(
@@ -3291,10 +3313,10 @@ class GenericDiscreteTimeSystem(nn.Module):
                     line=dict(width=3, color=color),
                     legendgroup=f"traj_{b}",
                     hovertemplate=f"<b>{traj_name}</b><br>"
-                                  f"{state_names[0]}: %{{x:.4f}}<br>"
-                                  f"{state_names[1]}: %{{y:.4f}}<br>"
-                                  f"{state_names[2]}: %{{z:.4f}}<br>"
-                                  f"Time: %{{text:.3f}}s<extra></extra>",
+                    f"{state_names[0]}: %{{x:.4f}}<br>"
+                    f"{state_names[1]}: %{{y:.4f}}<br>"
+                    f"{state_names[2]}: %{{z:.4f}}<br>"
+                    f"Time: %{{text:.3f}}s<extra></extra>",
                     text=time_steps,
                 )
             )
@@ -3366,7 +3388,9 @@ class GenericDiscreteTimeSystem(nn.Module):
             )
 
         if title is None:
-            title = f"{self.continuous_time_system.__class__.__name__} 3D Phase Portrait"
+            title = (
+                f"{self.continuous_time_system.__class__.__name__} 3D Phase Portrait"
+            )
 
         fig.update_layout(
             title=title,
@@ -3374,9 +3398,7 @@ class GenericDiscreteTimeSystem(nn.Module):
                 xaxis_title=state_names[0],
                 yaxis_title=state_names[1],
                 zaxis_title=state_names[2],
-                camera=dict(
-                    eye=dict(x=1.5, y=1.5, z=1.3)
-                ),
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.3)),
             ),
             hovermode="closest",
             width=900,
